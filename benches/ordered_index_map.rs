@@ -5,7 +5,7 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Benchmarks primary-key and ordered-prefix operations.
+//! Benchmarks primary-key, ordered iteration, and range mutations.
 
 use criterion::{
     BatchSize,
@@ -102,9 +102,8 @@ fn benchmark_primary_lookup(criterion: &mut Criterion) {
 /// # Parameters
 ///
 /// * `criterion` - Criterion benchmark registry.
-fn benchmark_unindex_prefix(criterion: &mut Criterion) {
-    let mut group =
-        criterion.benchmark_group("ordered_index_map/unindex_prefix");
+fn benchmark_detach_range(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("ordered_index_map/detach_range");
     for entry_count in ENTRY_COUNTS {
         let upper_bound = entry_count / 2;
         group.throughput(Throughput::Elements((upper_bound + 1) as u64));
@@ -115,12 +114,72 @@ fn benchmark_unindex_prefix(criterion: &mut Criterion) {
                 bencher.iter_batched(
                     || populated_map(entry_count),
                     |mut map| {
-                        let _keys = black_box(
-                            map.unindex_through(black_box(&upper_bound)),
-                        );
+                        let mut cursor =
+                            map.detach_range(..=black_box(upper_bound));
+                        while let Some(entry) = cursor.next() {
+                            let _entry = black_box(entry);
+                        }
                     },
                     BatchSize::SmallInput,
                 );
+            },
+        );
+    }
+    group.finish();
+}
+
+/// Benchmarks consuming the inclusive lower half of an ordered index.
+///
+/// # Parameters
+///
+/// * `criterion` - Criterion benchmark registry.
+fn benchmark_extract_range(criterion: &mut Criterion) {
+    let mut group =
+        criterion.benchmark_group("ordered_index_map/extract_range");
+    for entry_count in ENTRY_COUNTS {
+        let upper_bound = entry_count / 2;
+        group.throughput(Throughput::Elements((upper_bound + 1) as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(entry_count),
+            &entry_count,
+            |bencher, &entry_count| {
+                bencher.iter_batched(
+                    || populated_map(entry_count),
+                    |mut map| {
+                        for entry in
+                            map.extract_range(..=black_box(upper_bound))
+                        {
+                            let _entry = black_box(entry);
+                        }
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
+/// Benchmarks traversal of values through the ordered index.
+///
+/// # Parameters
+///
+/// * `criterion` - Criterion benchmark registry.
+fn benchmark_values_ordered(criterion: &mut Criterion) {
+    let mut group =
+        criterion.benchmark_group("ordered_index_map/values_ordered");
+    for entry_count in ENTRY_COUNTS {
+        let map = populated_map(entry_count);
+        group.throughput(Throughput::Elements(entry_count as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(entry_count),
+            &entry_count,
+            |bencher, &_entry_count| {
+                bencher.iter(|| {
+                    for value in map.values_ordered() {
+                        black_box(value);
+                    }
+                });
             },
         );
     }
@@ -131,6 +190,8 @@ criterion_group!(
     benches,
     benchmark_insertion,
     benchmark_primary_lookup,
-    benchmark_unindex_prefix,
+    benchmark_detach_range,
+    benchmark_extract_range,
+    benchmark_values_ordered,
 );
 criterion_main!(benches);

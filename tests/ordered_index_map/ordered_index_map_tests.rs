@@ -6,633 +6,725 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-use qubit_collections::OrderedIndexMap;
-use std::cmp::Ordering as CmpOrdering;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{
     Hash,
     Hasher,
 };
+use std::ops::Bound;
 use std::panic::{
     AssertUnwindSafe,
     catch_unwind,
 };
 use std::sync::Arc;
 use std::sync::atomic::{
-    AtomicUsize,
-    Ordering,
+    AtomicBool,
+    Ordering as AtomicOrdering,
 };
 
-/// Primary key that panics on one selected hash invocation.
+use qubit_collections::{
+    IndexState,
+    OrderedIndexMap,
+};
+
+/// Primary key that intentionally does not implement [`Clone`].
+#[derive(Debug, Eq, Hash, PartialEq)]
+struct NonCloneKey(u64);
+
+/// Order key that can panic while an ordered index is being changed.
 #[derive(Clone, Debug)]
-struct PanicOnNthHash {
-    /// Logical key value.
+struct PanicOrder {
+    /// Logical order value.
     value: u64,
-    /// Shared hash invocation count.
-    hash_calls: Arc<AtomicUsize>,
-    /// One-based hash invocation that must panic.
-    panic_on_call: usize,
+    /// Whether comparisons must panic.
+    panic: Arc<AtomicBool>,
 }
 
-impl PartialEq for PanicOnNthHash {
+impl PartialEq for PanicOrder {
     fn eq(&self, other: &Self) -> bool {
         self.value == other.value
     }
 }
 
-impl Eq for PanicOnNthHash {}
+impl Eq for PanicOrder {}
 
-impl Hash for PanicOnNthHash {
-    /// Hashes the logical key while panicking on the configured invocation.
+impl PartialOrd for PanicOrder {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PanicOrder {
+    fn cmp(&self, other: &Self) -> Ordering {
+        assert!(
+            !self.panic.load(AtomicOrdering::SeqCst),
+            "intentional order comparison panic",
+        );
+        self.value.cmp(&other.value)
+    }
+}
+
+/// Primary key that panics when hashing is enabled.
+#[derive(Clone, Debug)]
+struct PanicHash {
+    /// Logical key value.
+    value: u64,
+    /// Whether hashing must panic.
+    panic: Arc<AtomicBool>,
+}
+
+impl PartialEq for PanicHash {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl Eq for PanicHash {}
+
+impl Hash for PanicHash {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        let call = self.hash_calls.fetch_add(1, Ordering::SeqCst) + 1;
-        assert_ne!(
-            self.panic_on_call, call,
-            "intentional primary-key hash panic",
+        assert!(
+            !self.panic.load(AtomicOrdering::SeqCst),
+            "intentional hash panic",
         );
         self.value.hash(state);
     }
 }
 
-/// Primary key whose clones retain equality while exposing their generation.
-#[derive(Debug)]
-struct CloneDistinctKey {
-    /// Logical primary-key identity.
-    identifier: u8,
-    /// Number of clone operations from the originally inserted key.
-    clone_generation: u8,
-}
-
-impl CloneDistinctKey {
-    /// Creates an originally inserted primary key.
-    fn new(identifier: u8) -> Self {
-        Self {
-            identifier,
-            clone_generation: 0,
-        }
-    }
-}
-
-impl Clone for CloneDistinctKey {
-    /// Produces an equal primary key with a distinct clone generation.
-    fn clone(&self) -> Self {
-        Self {
-            identifier: self.identifier,
-            clone_generation: self.clone_generation + 1,
-        }
-    }
-}
-
-impl PartialEq for CloneDistinctKey {
-    /// Compares logical primary-key identities only.
-    fn eq(&self, other: &Self) -> bool {
-        self.identifier == other.identifier
-    }
-}
-
-impl Eq for CloneDistinctKey {}
-
-impl Hash for CloneDistinctKey {
-    /// Hashes the logical primary-key identity only.
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.identifier.hash(state);
-    }
-}
-
-/// Secondary key whose clones retain ordering while exposing their generation.
-#[derive(Debug)]
-struct CloneDistinctOrderKey {
-    /// Logical secondary-key priority.
-    priority: u8,
-    /// Number of clone operations from the originally inserted order key.
-    clone_generation: u8,
-}
-
-impl CloneDistinctOrderKey {
-    /// Creates an originally inserted secondary key.
-    fn new(priority: u8) -> Self {
-        Self {
-            priority,
-            clone_generation: 0,
-        }
-    }
-}
-
-impl Clone for CloneDistinctOrderKey {
-    /// Produces an equal secondary key with a distinct clone generation.
-    fn clone(&self) -> Self {
-        Self {
-            priority: self.priority,
-            clone_generation: self.clone_generation + 1,
-        }
-    }
-}
-
-impl PartialEq for CloneDistinctOrderKey {
-    /// Compares logical secondary-key priorities only.
-    fn eq(&self, other: &Self) -> bool {
-        self.priority == other.priority
-    }
-}
-
-impl Eq for CloneDistinctOrderKey {}
-
-impl PartialOrd for CloneDistinctOrderKey {
-    /// Compares logical secondary-key priorities only.
-    fn partial_cmp(&self, other: &Self) -> Option<CmpOrdering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for CloneDistinctOrderKey {
-    /// Orders secondary keys by their logical priority only.
-    fn cmp(&self, other: &Self) -> CmpOrdering {
-        self.priority.cmp(&other.priority)
-    }
-}
-
-/// Minimal reference representation for one primary record.
-#[derive(Debug)]
-struct ReferenceEntry {
-    /// Secondary key retained by the primary record.
-    order_key: u8,
-    /// Stable sequence assigned when the record was last inserted.
-    sequence: u64,
-    /// Value stored for the primary record.
+/// Minimal model record used by the bounded mixed-operation test.
+#[derive(Clone, Debug)]
+struct ModelEntry {
+    /// Retained secondary order.
+    order: u8,
+    /// Stored value.
     value: i16,
-    /// Whether the record currently participates in ordered operations.
-    indexed: bool,
+    /// Stable sequence of the latest attachment.
+    sequence: Option<u64>,
 }
 
-/// Advances the deterministic state used to generate mixed operations.
-fn next_reference_state(state: &mut u64) -> u64 {
+/// Advances the deterministic mixed-operation generator.
+fn next_state(state: &mut u64) -> u64 {
     *state = state
         .wrapping_mul(6_364_136_223_846_793_005)
         .wrapping_add(1_442_695_040_888_963_407);
     *state
 }
 
-/// Finds the current first indexed record in the reference model.
-fn reference_first(
-    model: &HashMap<u8, ReferenceEntry>,
-) -> Option<(u8, u8, i16)> {
-    model
+/// Returns the model's attached records in ordered iteration order.
+fn ordered_model(model: &HashMap<u8, ModelEntry>) -> Vec<(u8, u8, i16)> {
+    let mut records = model
         .iter()
-        .filter(|(_key, entry)| entry.indexed)
-        .min_by_key(|(key, entry)| (entry.order_key, entry.sequence, **key))
-        .map(|(key, entry)| (*key, entry.order_key, entry.value))
+        .filter_map(|(key, entry)| {
+            entry
+                .sequence
+                .map(|sequence| (entry.order, sequence, *key, entry.value))
+        })
+        .collect::<Vec<_>>();
+    records.sort_unstable();
+    records
+        .into_iter()
+        .map(|(order, _sequence, key, value)| (key, order, value))
+        .collect()
 }
 
-/// Asserts that every observable collection view matches the reference model.
-fn assert_matches_reference_model(
+/// Verifies every public read view against the model.
+fn assert_matches_model(
     map: &OrderedIndexMap<u8, u8, i16>,
-    model: &HashMap<u8, ReferenceEntry>,
-    key_space: u8,
+    model: &HashMap<u8, ModelEntry>,
 ) {
     assert_eq!(model.len(), map.len());
     assert_eq!(
-        model.values().filter(|entry| entry.indexed).count(),
-        map.indexed_len(),
+        model
+            .values()
+            .filter(|entry| entry.sequence.is_some())
+            .count(),
+        map.attached_len(),
     );
-    assert_eq!(model.is_empty(), map.is_empty());
-    assert_eq!(
-        model.values().all(|entry| !entry.indexed),
-        map.is_index_empty(),
-    );
-
-    for key in 0..key_space {
-        assert_eq!(model.contains_key(&key), map.contains_key(&key));
+    let actual = map
+        .iter_ordered()
+        .map(|entry| (*entry.key(), *entry.order(), *entry.value()))
+        .collect::<Vec<_>>();
+    assert_eq!(ordered_model(model), actual);
+    for key in 0..8 {
+        let expected = model.get(&key);
+        assert_eq!(expected.is_some(), map.contains_key(&key));
+        assert_eq!(expected.map(|entry| entry.value), map.get(&key).copied());
         assert_eq!(
-            model.get(&key).map(|entry| entry.value),
-            map.get(&key).copied()
+            expected.map(|entry| entry.order),
+            map.get_entry(&key).map(|entry| *entry.order()),
         );
         assert_eq!(
-            model.get(&key).map(|entry| entry.order_key),
-            map.order_key(&key).copied(),
+            expected.map(|entry| {
+                if entry.sequence.is_some() {
+                    IndexState::Attached
+                } else {
+                    IndexState::Detached
+                }
+            }),
+            map.get_entry(&key).map(|entry| entry.state()),
         );
     }
+}
 
-    let expected_first = reference_first(model);
-    let actual_first = map
-        .first()
-        .map(|(key, order_key, value)| (*key, *order_key, *value));
-    assert_eq!(expected_first, actual_first);
+#[test]
+fn test_ordered_index_map_construction_and_capacity() {
+    let mut map = OrderedIndexMap::<u64, u64, &'static str>::with_capacity(16);
+    assert!(map.is_empty());
+    assert!(map.is_attached_empty());
+    assert_eq!(0, map.len());
+    assert_eq!(0, map.attached_len());
+    assert!(map.capacity() >= 16);
+
+    map.reserve(32);
+    assert!(map.capacity() >= 32);
+    assert!(OrderedIndexMap::<u64, u64, u64>::default().is_empty());
+}
+
+#[test]
+fn test_ordered_index_map_supports_non_clone_primary_keys() {
+    let mut map = OrderedIndexMap::new();
+    assert!(map.insert(NonCloneKey(1), 10_u64, "value").is_none());
+
+    let entry = map
+        .get_entry(&NonCloneKey(1))
+        .expect("inserted non-clone key should remain addressable");
+    assert_eq!(&NonCloneKey(1), entry.key());
+    assert_eq!(&10, entry.order());
+    assert_eq!(&"value", entry.value());
+    assert_eq!(IndexState::Attached, entry.state());
+}
+
+#[test]
+fn test_ordered_index_map_insert_lookup_and_replace() {
+    let mut map = OrderedIndexMap::new();
+    map.insert(String::from("later"), 20, String::from("old"));
+    map.insert(String::from("first"), 10, String::from("first"));
+
+    assert_eq!(Some(&String::from("old")), map.get("later"));
+    map.get_mut("later")
+        .expect("inserted value should exist")
+        .push_str("-updated");
+    let previous = map
+        .insert(String::from("later"), 5, String::from("replacement"))
+        .expect("replacement should return the old record");
     assert_eq!(
-        expected_first.map(|(_key, order_key, _value)| order_key),
-        map.first_order_key().copied(),
+        (
+            String::from("later"),
+            20,
+            String::from("old-updated"),
+            IndexState::Attached,
+        ),
+        previous.into_parts(),
+    );
+    let first = map.first().expect("an attached record should exist");
+    assert_eq!("later", first.key());
+    assert_eq!(&5, first.order());
+    assert_eq!("replacement", first.value());
+}
+
+#[test]
+fn test_ordered_index_map_entry_views_expose_every_component() {
+    let mut map = OrderedIndexMap::new();
+    map.insert(1, 10, String::from("value"));
+
+    {
+        let mut entry = map.get_entry_mut(&1).expect("mutable entry view");
+        assert_eq!(&1, entry.key());
+        assert_eq!(&10, entry.order());
+        assert_eq!("value", entry.value());
+        assert_eq!(IndexState::Attached, entry.state());
+        assert!(entry.is_attached());
+        assert!(!entry.is_detached());
+        entry.value_mut().push_str("-mut");
+    }
+    map.get_entry_mut(&1)
+        .expect("second mutable entry view")
+        .into_value_mut()
+        .push_str("-consumed");
+    assert!(map.get_entry_mut(&2).is_none());
+
+    {
+        let entry = map.get_entry(&1).expect("shared attached entry view");
+        assert!(entry.is_attached());
+        assert!(!entry.is_detached());
+    }
+    {
+        let mut entry = map.detach(&1).expect("first detached entry view");
+        assert_eq!(&1, entry.key());
+        assert_eq!(&10, entry.order());
+        assert_eq!("value-mut-consumed", entry.value());
+        entry.value_mut().push_str("-detached");
+    }
+    assert!(map.attach(&1).is_some());
+    map.detach(&1)
+        .expect("second detached entry view")
+        .into_value_mut()
+        .push_str("-consumed");
+    let entry = map.get_entry(&1).expect("shared detached entry view");
+    assert!(!entry.is_attached());
+    assert!(entry.is_detached());
+    assert_eq!("value-mut-consumed-detached-consumed", entry.value());
+}
+
+#[test]
+fn test_ordered_index_map_owned_entry_accessors_and_consumers() {
+    let mut map = OrderedIndexMap::new();
+    map.insert(1, 10, String::from("one"));
+    let mut entry = map.remove(&1).expect("owned entry");
+    assert_eq!(&1, entry.key());
+    assert_eq!(&10, entry.order());
+    assert_eq!("one", entry.value());
+    assert_eq!(IndexState::Attached, entry.state());
+    entry.value_mut().push_str("-mut");
+    assert_eq!("one-mut", entry.value());
+
+    map.insert(2, 20, String::from("two"));
+    assert_eq!(20, map.remove(&2).expect("owned order").into_order());
+    map.insert(3, 30, String::from("three"));
+    assert_eq!(
+        String::from("three"),
+        map.remove(&3).expect("owned value").into_value(),
     );
 }
 
 #[test]
-fn test_ordered_index_map_new_is_empty() {
-    let map = OrderedIndexMap::<u64, u64, &'static str>::new();
-    assert_eq!(0, map.len());
-    assert_eq!(0, map.indexed_len());
-    assert!(map.is_empty());
-    assert!(map.is_index_empty());
-    assert_eq!(None, map.first_order_key());
-    assert_eq!(None, map.first());
-
-    let default_map = OrderedIndexMap::<u64, u64, &'static str>::default();
-    assert!(default_map.is_empty());
-}
-
-#[test]
-fn test_ordered_index_map_insert_get_and_first() {
+fn test_ordered_index_map_equal_orders_are_stable() {
     let mut map = OrderedIndexMap::new();
-    assert_eq!(None, map.insert(2_u64, 20_u64, "later"));
-    assert_eq!(None, map.insert(1_u64, 10_u64, "earlier"));
+    map.insert(2, 10, "first");
+    map.insert(1, 10, "second");
+    map.insert(3, 10, "third");
 
-    assert_eq!(2, map.len());
-    assert_eq!(2, map.indexed_len());
-    assert!(map.contains_key(&1));
-    assert_eq!(Some(&"later"), map.get(&2));
-    assert_eq!(Some(&10), map.order_key(&1));
-    assert_eq!(Some(&10), map.first_order_key());
-    assert_eq!(Some((&1, &10, &"earlier")), map.first());
+    let keys = map
+        .iter_ordered()
+        .map(|entry| *entry.key())
+        .collect::<Vec<_>>();
+    assert_eq!(vec![2, 1, 3], keys);
+    assert_eq!(2, map.pop_first().expect("first record").into_key());
+    assert_eq!(1, map.pop_first().expect("second record").into_key());
+    assert_eq!(3, map.pop_first().expect("third record").into_key());
+    assert!(map.pop_first().is_none());
 }
 
 #[test]
-fn test_ordered_index_map_get_mut_updates_only_value() {
+fn test_ordered_index_map_detach_attach_and_set_order() {
     let mut map = OrderedIndexMap::new();
-    map.insert(1_u64, 10_u64, String::from("value"));
+    map.insert("later", 20, String::from("later"));
+    map.insert("first", 10, String::from("first"));
 
-    map.get_mut(&1)
-        .expect("inserted value should remain addressable")
-        .push_str("-updated");
+    let mut detached = map.detach("first").expect("record should detach");
+    detached.value_mut().push_str("-detached");
+    drop(detached);
+    assert!(map.detach("first").is_none());
+    assert_eq!(1, map.attached_len());
+    assert_eq!(
+        vec!["later"],
+        map.values_ordered().map(String::as_str).collect::<Vec<_>>(),
+    );
+    assert_eq!(Some(10), map.set_order("first", 5));
 
-    assert_eq!(Some(&String::from("value-updated")), map.get(&1));
-    assert_eq!(Some(&10), map.order_key(&1));
+    let attached = map.attach("first").expect("record should attach");
+    assert_eq!(IndexState::Attached, attached.state());
+    assert_eq!(&5, attached.order());
+    assert_eq!("first-detached", attached.value());
+    assert!(map.attach("first").is_none());
+    assert_eq!(
+        vec!["first-detached", "later"],
+        map.values_ordered().map(String::as_str).collect::<Vec<_>>(),
+    );
 }
 
 #[test]
-fn test_ordered_index_map_replacement_returns_previous_entry() {
+fn test_ordered_index_map_set_order_repositions_attached_record() {
     let mut map = OrderedIndexMap::new();
-    map.insert(7_u64, 20_u64, "old");
+    map.insert("first", 10, 1);
+    map.insert("second", 20, 2);
 
-    assert_eq!(Some((20, "old")), map.insert(7, 5, "new"));
-    assert_eq!(1, map.len());
-    assert_eq!(1, map.indexed_len());
-    assert_eq!(Some((&7, &5, &"new")), map.first());
+    assert_eq!(Some(20), map.set_order("second", 5));
+    let entries = map
+        .iter_ordered()
+        .map(|entry| (*entry.key(), *entry.order()))
+        .collect::<Vec<_>>();
+    assert_eq!(vec![("second", 5), ("first", 10)], entries);
 }
 
 #[test]
-fn test_ordered_index_map_replacement_gets_new_stable_sequence() {
+fn test_ordered_index_map_range_and_values_ordered() {
     let mut map = OrderedIndexMap::new();
-    map.insert(1_u64, 10_u64, "first");
-    map.insert(2_u64, 10_u64, "second");
+    map.insert(1, 10, "ten");
+    map.insert(2, 20, "twenty-first");
+    map.insert(3, 20, "twenty-second");
+    map.insert(4, 30, "thirty");
 
-    assert_eq!(Some((10, "first")), map.insert(1, 10, "replacement"));
-    assert_eq!(Some((2, 10, "second")), map.pop_first());
-    assert_eq!(Some((1, 10, "replacement")), map.pop_first());
+    let values = map
+        .range(15..=20)
+        .map(|entry| *entry.value())
+        .collect::<Vec<_>>();
+    assert_eq!(vec!["twenty-first", "twenty-second"], values);
+    assert_eq!(
+        vec!["ten", "twenty-first", "twenty-second", "thirty"],
+        map.values_ordered().copied().collect::<Vec<_>>(),
+    );
 }
 
 #[test]
-fn test_ordered_index_map_replacement_reindexes_detached_entry() {
+fn test_ordered_index_map_all_range_bound_forms() {
     let mut map = OrderedIndexMap::new();
-    map.insert(1_u64, 10_u64, "detached");
-    assert!(map.unindex(&1));
+    for key in 0..4 {
+        map.insert(key, key, key);
+    }
 
-    assert_eq!(Some((10, "detached")), map.insert(1, 20, "reindexed"));
-    assert_eq!(1, map.len());
-    assert_eq!(1, map.indexed_len());
-    assert_eq!(Some((&1, &20, &"reindexed")), map.first());
+    assert_eq!(
+        vec![1],
+        map.range(1..2)
+            .map(|entry| *entry.key())
+            .collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        vec![2, 3],
+        map.range((Bound::Excluded(1), Bound::Unbounded,))
+            .map(|entry| *entry.key())
+            .collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        vec![0, 1],
+        map.range(..2).map(|entry| *entry.key()).collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        vec![2, 3],
+        map.range(2..).map(|entry| *entry.key()).collect::<Vec<_>>(),
+    );
+
+    let mut detached = map.detach_range(..2);
+    while detached.next().is_some() {}
+    drop(detached);
+    let extracted = map
+        .extract_range((Bound::Excluded(2), Bound::Unbounded))
+        .map(|entry| entry.into_key())
+        .collect::<Vec<_>>();
+    assert_eq!(vec![3], extracted);
 }
 
 #[test]
-fn test_ordered_index_map_duplicate_order_keys_are_stable() {
+fn test_ordered_index_map_detach_range_is_lending_and_double_ended() {
     let mut map = OrderedIndexMap::new();
-    map.insert(2_u64, 10_u64, "first");
-    map.insert(1_u64, 10_u64, "second");
-    map.insert(3_u64, 10_u64, "third");
+    for key in 0..5 {
+        map.insert(key, key, key * 10);
+    }
 
-    assert_eq!(Some((2, 10, "first")), map.pop_first());
-    assert_eq!(Some((1, 10, "second")), map.pop_first());
-    assert_eq!(Some((3, 10, "third")), map.pop_first());
-    assert_eq!(None, map.pop_first());
+    let mut cursor = map.detach_range(1..=3);
+    let mut first = cursor.next().expect("lower record should detach");
+    assert_eq!(&1, first.key());
+    *first.value_mut() += 1;
+    drop(first);
+    let last = cursor.next_back().expect("upper record should detach");
+    assert_eq!(&3, last.key());
+    drop(last);
+    let middle = cursor.next().expect("middle record should detach");
+    assert_eq!(&2, middle.key());
+    drop(middle);
+    assert!(cursor.is_empty());
+    assert!(cursor.next().is_none());
+    drop(cursor);
+
+    assert_eq!(2, map.attached_len());
+    assert_eq!(Some(&11), map.get(&1));
+    assert_eq!(
+        vec![0, 4],
+        map.iter_ordered()
+            .map(|entry| *entry.key())
+            .collect::<Vec<_>>(),
+    );
 }
 
 #[test]
-fn test_ordered_index_map_unindex_handles_absent_and_empty_bounds() {
-    let mut map = OrderedIndexMap::<u64, u64, &'static str>::new();
-    assert!(!map.unindex(&1));
-    assert_eq!(None, map.unindex_first());
-    assert!(map.unindex_through(&10).is_empty());
-
-    map.insert(1, 20, "later");
-    assert!(map.unindex_through(&10).is_empty());
-    assert_eq!(1, map.len());
-    assert_eq!(1, map.indexed_len());
-}
-
-#[test]
-fn test_ordered_index_map_unindex_preserves_primary_entry() {
+fn test_ordered_index_map_extract_range_removes_only_yielded_records() {
     let mut map = OrderedIndexMap::new();
-    map.insert(1_u64, 10_u64, "detached");
-    map.insert(2_u64, 20_u64, "indexed");
+    for key in 0..5 {
+        map.insert(key, key, key * 10);
+    }
 
-    assert!(map.unindex(&1));
-    assert!(!map.unindex(&1));
+    let mut extracted = map.extract_range(1..=3);
+    assert_eq!(1, extracted.next().expect("first extraction").into_key());
+    assert_eq!(
+        3,
+        extracted.next_back().expect("last extraction").into_key()
+    );
+    drop(extracted);
 
-    assert_eq!(2, map.len());
-    assert_eq!(1, map.indexed_len());
-    assert_eq!(Some(&"detached"), map.get(&1));
-    assert_eq!(Some(&10), map.order_key(&1));
-    assert_eq!(Some((&2, &20, &"indexed")), map.first());
+    assert!(!map.contains_key(&1));
+    assert!(map.contains_key(&2));
+    assert!(!map.contains_key(&3));
+    assert_eq!(3, map.len());
 }
 
 #[test]
-fn test_ordered_index_map_unindex_first_preserves_primary_entry() {
+fn test_ordered_index_map_remove_preserves_prior_state() {
     let mut map = OrderedIndexMap::new();
-    map.insert(2_u64, 20_u64, "later");
-    map.insert(1_u64, 10_u64, "first");
+    map.insert(1, 10, "attached");
+    map.insert(2, 20, "detached");
+    assert!(map.detach(&2).is_some());
 
-    assert_eq!(Some((1, 10)), map.unindex_first());
-    assert_eq!(Some(&"first"), map.get(&1));
-    assert_eq!(Some(&10), map.order_key(&1));
-    assert_eq!(Some((&2, &20, &"later")), map.first());
+    assert_eq!(
+        (1, 10, "attached", IndexState::Attached),
+        map.remove(&1).expect("attached record").into_parts(),
+    );
+    assert_eq!(
+        (2, 20, "detached", IndexState::Detached),
+        map.remove(&2).expect("detached record").into_parts(),
+    );
+    assert!(map.remove(&3).is_none());
 }
 
 #[test]
-fn test_ordered_index_map_unindex_through_removes_bounded_prefix() {
+fn test_ordered_index_map_iter_includes_detached_records() {
     let mut map = OrderedIndexMap::new();
-    map.insert(1_u64, 10_u64, "ten");
-    map.insert(2_u64, 20_u64, "twenty-first");
-    map.insert(3_u64, 20_u64, "twenty-second");
-    map.insert(4_u64, 30_u64, "thirty");
+    map.insert(1, 10, "attached");
+    map.insert(2, 20, "detached");
+    assert!(map.detach(&2).is_some());
 
-    assert_eq!(vec![1, 2, 3], map.unindex_through(&20));
-    assert_eq!(4, map.len());
-    assert_eq!(1, map.indexed_len());
-    assert_eq!(Some(&"ten"), map.get(&1));
-    assert_eq!(Some(&"twenty-first"), map.get(&2));
-    assert_eq!(Some(&"twenty-second"), map.get(&3));
-    assert_eq!(Some((&4, &30, &"thirty")), map.first());
+    let mut states = map
+        .iter()
+        .map(|entry| (*entry.key(), entry.state()))
+        .collect::<Vec<_>>();
+    states.sort_unstable_by_key(|entry| entry.0);
+    assert_eq!(
+        vec![(1, IndexState::Attached), (2, IndexState::Detached),],
+        states,
+    );
 }
 
 #[test]
-fn test_ordered_index_map_remove_handles_indexed_and_unindexed_entries() {
-    let mut map = OrderedIndexMap::new();
-    map.insert(1_u64, 10_u64, "indexed");
-    map.insert(2_u64, 20_u64, "detached");
-    assert!(map.unindex(&2));
-
-    assert_eq!(Some((10, "indexed")), map.remove(&1));
-    assert_eq!(Some((20, "detached")), map.remove(&2));
-    assert_eq!(None, map.remove(&3));
-    assert!(map.is_empty());
-    assert!(map.is_index_empty());
-}
-
-#[test]
-fn test_ordered_index_map_pop_first_removes_complete_entry() {
-    let mut map = OrderedIndexMap::new();
-    map.insert(1_u64, 20_u64, "later");
-    map.insert(2_u64, 10_u64, "earlier");
-
-    assert_eq!(Some((2, 10, "earlier")), map.pop_first());
-    assert!(!map.contains_key(&2));
-    assert_eq!(1, map.len());
-    assert_eq!(1, map.indexed_len());
-}
-
-#[test]
-fn test_ordered_index_map_clear_removes_both_views() {
-    let mut map = OrderedIndexMap::new();
-    map.insert(1_u64, 10_u64, "indexed");
-    map.insert(2_u64, 20_u64, "detached");
-    assert!(map.unindex(&2));
+fn test_ordered_index_map_clear_retains_capacity() {
+    let mut map = OrderedIndexMap::with_capacity(8);
+    map.insert(1, 10, "attached");
+    map.insert(2, 20, "detached");
+    assert!(map.detach(&2).is_some());
+    let capacity = map.capacity();
 
     map.clear();
 
     assert!(map.is_empty());
-    assert!(map.is_index_empty());
-    assert_eq!(None, map.get(&1));
-    assert_eq!(None, map.get(&2));
+    assert!(map.is_attached_empty());
+    assert_eq!(capacity, map.capacity());
 }
 
 #[test]
-fn test_ordered_index_map_clone_preserves_independent_views() {
+fn test_ordered_index_map_clone_is_independent() {
     let mut original = OrderedIndexMap::new();
-    original.insert(1_u64, 10_u64, String::from("indexed"));
-    original.insert(2_u64, 20_u64, String::from("detached"));
-    assert!(original.unindex(&2));
+    original.insert(1, 10, String::from("attached"));
+    original.insert(2, 20, String::from("detached"));
+    assert!(original.detach(&2).is_some());
 
     let mut cloned = original.clone();
-    assert_eq!(2, cloned.len());
-    assert_eq!(1, cloned.indexed_len());
-    assert_eq!(Some((&1, &10, &String::from("indexed"))), cloned.first());
-    assert_eq!(Some((10, String::from("indexed"))), cloned.remove(&1));
+    cloned.get_mut(&1).expect("cloned value").push_str("-clone");
+    drop(cloned.attach(&2).expect("cloned detached record"));
 
-    assert!(cloned.contains_key(&2));
-    assert!(original.contains_key(&1));
-    assert_eq!(Some((&1, &10, &String::from("indexed"))), original.first());
+    assert_eq!("attached", original.get(&1).expect("original value"));
+    assert_eq!(1, original.attached_len());
+    assert_eq!(2, cloned.attached_len());
+    assert!(format!("{cloned:?}").contains("OrderedIndexMap"));
 }
 
 #[test]
-fn test_ordered_index_map_supports_borrowed_key_queries() {
-    let mut map = OrderedIndexMap::new();
-    map.insert(String::from("alpha"), 1_u64, 10_u64);
-
-    assert!(map.contains_key("alpha"));
-    assert_eq!(Some(&1), map.order_key("alpha"));
-    assert_eq!(Some(&10), map.get("alpha"));
-    *map.get_mut("alpha")
-        .expect("borrowed key should provide mutable access") = 20;
-    assert!(map.unindex("alpha"));
-    assert_eq!(Some((1, 20)), map.remove("alpha"));
+fn test_ordered_index_map_is_send_and_sync_when_components_are() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<OrderedIndexMap<String, u64, Vec<u8>>>();
 }
 
 #[test]
-fn test_ordered_index_map_poisoned_after_mutation_panic() {
-    let hash_calls = Arc::new(AtomicUsize::new(0));
-    let key = PanicOnNthHash {
-        value: 1,
-        hash_calls,
-        panic_on_call: 2,
-    };
+fn test_ordered_index_map_preflight_hash_panic_does_not_poison() {
+    let panic = Arc::new(AtomicBool::new(false));
     let mut map = OrderedIndexMap::new();
     map.insert(
-        PanicOnNthHash {
-            value: 0,
-            hash_calls: Arc::new(AtomicUsize::new(0)),
-            panic_on_call: usize::MAX,
+        PanicHash {
+            value: 1,
+            panic: Arc::clone(&panic),
         },
-        0_u64,
-        "sentinel",
-    );
-
-    let insertion = catch_unwind(AssertUnwindSafe(|| {
-        map.insert(key, 10_u64, "value");
-    }));
-    assert!(insertion.is_err());
-
-    let later_access = catch_unwind(AssertUnwindSafe(|| map.len()));
-    assert!(
-        later_access.is_err(),
-        "a partially updated map must reject subsequent use",
-    );
-}
-
-#[test]
-fn test_ordered_index_map_first_and_pop_first_return_primary_owned_keys() {
-    let mut map = OrderedIndexMap::new();
-    map.insert(
-        CloneDistinctKey::new(7),
-        CloneDistinctOrderKey::new(3),
+        1,
         "value",
     );
+    panic.store(true, AtomicOrdering::SeqCst);
 
-    let (first_key, first_order_key, first_value) = map
-        .first()
-        .expect("inserted entry should be the first indexed entry");
-    assert_eq!(0, first_key.clone_generation);
-    assert_eq!(0, first_order_key.clone_generation);
-    assert_eq!(&"value", first_value);
-
-    let (popped_key, popped_order_key, popped_value) = map.pop_first().expect(
-        "inserted entry should be removable as the first indexed entry",
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            let _ = map.remove(&PanicHash {
+                value: 1,
+                panic: Arc::clone(&panic),
+            });
+        }))
+        .is_err(),
     );
-    assert_eq!(0, popped_key.clone_generation);
-    assert_eq!(0, popped_order_key.clone_generation);
-    assert_eq!("value", popped_value);
+    panic.store(false, AtomicOrdering::SeqCst);
+    assert_eq!(1, map.len());
+    assert_eq!(Some(&"value"), map.get(&PanicHash { value: 1, panic }));
 }
 
 #[test]
-fn test_ordered_index_map_matches_reference_model_for_mixed_operations() {
-    const KEY_SPACE: u8 = 8;
-    const OPERATION_COUNT: usize = 512;
+fn test_ordered_index_map_poisoned_after_reserve_hash_panic() {
+    let panic = Arc::new(AtomicBool::new(false));
+    let mut map = OrderedIndexMap::new();
+    map.insert(
+        PanicHash {
+            value: 1,
+            panic: Arc::clone(&panic),
+        },
+        1,
+        "value",
+    );
+    panic.store(true, AtomicOrdering::SeqCst);
+
+    assert!(catch_unwind(AssertUnwindSafe(|| map.reserve(1_024))).is_err(),);
+    assert!(catch_unwind(AssertUnwindSafe(|| map.len())).is_err());
+}
+
+#[test]
+fn test_ordered_index_map_poisoned_after_order_mutation_panic() {
+    let panic = Arc::new(AtomicBool::new(false));
+    let mut map = OrderedIndexMap::new();
+    map.insert(
+        1,
+        PanicOrder {
+            value: 1,
+            panic: Arc::clone(&panic),
+        },
+        "first",
+    );
+    panic.store(true, AtomicOrdering::SeqCst);
+
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            map.insert(
+                2,
+                PanicOrder {
+                    value: 2,
+                    panic: Arc::clone(&panic),
+                },
+                "second",
+            );
+        }))
+        .is_err(),
+    );
+    assert!(catch_unwind(AssertUnwindSafe(|| map.len())).is_err());
+}
+
+#[test]
+fn test_ordered_index_map_matches_bounded_mixed_operation_model() {
+    const OPERATION_COUNT: usize = 1_024;
 
     let mut map = OrderedIndexMap::new();
-    let mut model: HashMap<u8, ReferenceEntry> = HashMap::new();
-    let mut next_sequence = 0_u64;
+    let mut model = HashMap::<u8, ModelEntry>::new();
+    let mut sequence = 0_u64;
     let mut state = 0x6A09_E667_F3BC_C909_u64;
 
     for _ in 0..OPERATION_COUNT {
-        let generated = next_reference_state(&mut state);
-        let operation = generated % 8;
-        let key = ((generated >> 8) % u64::from(KEY_SPACE)) as u8;
-        let order_key = ((generated >> 16) % 4) as u8;
+        let generated = next_state(&mut state);
+        let operation = generated % 7;
+        let key = ((generated >> 8) % 8) as u8;
+        let order = ((generated >> 16) % 4) as u8;
         let value = (generated >> 24) as i16;
 
         match operation {
             0 => {
-                let expected_previous = model
-                    .remove(&key)
-                    .map(|entry| (entry.order_key, entry.value));
-                model.insert(
+                let expected = model.insert(
                     key,
-                    ReferenceEntry {
-                        order_key,
-                        sequence: next_sequence,
+                    ModelEntry {
+                        order,
                         value,
-                        indexed: true,
+                        sequence: Some(sequence),
                     },
                 );
-                next_sequence += 1;
+                sequence += 1;
                 assert_eq!(
-                    expected_previous,
-                    map.insert(key, order_key, value)
+                    expected.map(|entry| {
+                        (
+                            key,
+                            entry.order,
+                            entry.value,
+                            if entry.sequence.is_some() {
+                                IndexState::Attached
+                            } else {
+                                IndexState::Detached
+                            },
+                        )
+                    }),
+                    map.insert(key, order, value)
+                        .map(|entry| entry.into_parts()),
                 );
             }
             1 => {
                 let expected = match model.get_mut(&key) {
-                    Some(entry) if entry.indexed => {
-                        entry.indexed = false;
+                    Some(entry) if entry.sequence.is_some() => {
+                        entry.sequence = None;
                         true
                     }
                     _ => false,
                 };
-                assert_eq!(expected, map.unindex(&key));
+                assert_eq!(expected, map.detach(&key).is_some());
             }
             2 => {
-                let expected = model
-                    .remove(&key)
-                    .map(|entry| (entry.order_key, entry.value));
-                assert_eq!(expected, map.remove(&key));
+                let expected = match model.get_mut(&key) {
+                    Some(entry) if entry.sequence.is_none() => {
+                        entry.sequence = Some(sequence);
+                        sequence += 1;
+                        true
+                    }
+                    _ => false,
+                };
+                assert_eq!(expected, map.attach(&key).is_some());
             }
             3 => {
-                let expected = reference_first(&model).map(
-                    |(first_key, first_order_key, _value)| {
-                        model
-                            .get_mut(&first_key)
-                            .expect("reference first record must remain stored")
-                            .indexed = false;
-                        (first_key, first_order_key)
-                    },
-                );
-                assert_eq!(expected, map.unindex_first());
+                let expected = model.get_mut(&key).map(|entry| {
+                    let previous = std::mem::replace(&mut entry.order, order);
+                    if entry.sequence.is_some() {
+                        entry.sequence = Some(sequence);
+                        sequence += 1;
+                    }
+                    previous
+                });
+                assert_eq!(expected, map.set_order(&key, order));
             }
             4 => {
-                let expected = reference_first(&model).map(
-                    |(first_key, first_order_key, first_value)| {
-                        model.remove(&first_key);
-                        (first_key, first_order_key, first_value)
-                    },
+                let expected = model.remove(&key).map(|entry| {
+                    (
+                        key,
+                        entry.order,
+                        entry.value,
+                        if entry.sequence.is_some() {
+                            IndexState::Attached
+                        } else {
+                            IndexState::Detached
+                        },
+                    )
+                });
+                assert_eq!(
+                    expected,
+                    map.remove(&key).map(|entry| entry.into_parts()),
                 );
-                assert_eq!(expected, map.pop_first());
             }
             5 => {
-                let mut detached_entries: Vec<(u8, u64, u8)> = model
-                    .iter()
-                    .filter(|(_key, entry)| {
-                        entry.indexed && entry.order_key <= order_key
-                    })
-                    .map(|(indexed_key, entry)| {
-                        (entry.order_key, entry.sequence, *indexed_key)
-                    })
-                    .collect();
-                detached_entries.sort_unstable();
-                let expected: Vec<u8> = detached_entries
-                    .iter()
-                    .map(|(_entry_order_key, _sequence, indexed_key)| {
-                        *indexed_key
-                    })
-                    .collect();
-                for (_entry_order_key, _sequence, indexed_key) in
-                    detached_entries
-                {
-                    model
-                        .get_mut(&indexed_key)
-                        .expect("reference detached record must remain stored")
-                        .indexed = false;
+                let expected = ordered_model(&model).first().copied();
+                if let Some((first_key, _order, _value)) = expected {
+                    model.remove(&first_key);
                 }
-                assert_eq!(expected, map.unindex_through(&order_key));
+                assert_eq!(
+                    expected,
+                    map.pop_first().map(|entry| {
+                        let (key, order, value, state) = entry.into_parts();
+                        assert_eq!(IndexState::Attached, state);
+                        (key, order, value)
+                    }),
+                );
             }
-            6 => {
-                if let Some(actual_value) = map.get_mut(&key) {
-                    *actual_value = value;
-                    model
-                        .get_mut(&key)
-                        .expect(
-                            "mutable map access requires a reference record",
-                        )
-                        .value = value;
+            _ => {
+                if let Some(entry) = model.get_mut(&key) {
+                    entry.value = value;
                 }
-            }
-            _operation => {
-                map.clear();
-                model.clear();
-                next_sequence = 0;
+                if let Some(stored) = map.get_mut(&key) {
+                    *stored = value;
+                }
             }
         }
-
-        assert_matches_reference_model(&map, &model, KEY_SPACE);
+        assert_matches_model(&map, &model);
     }
-}
-
-#[test]
-fn test_ordered_index_map_iter_ordered_skips_unindexed_entries() {
-    let mut map = OrderedIndexMap::new();
-    map.insert("late", 30, "late");
-    map.insert("first", 10, "first");
-    map.insert("middle", 20, "middle");
-    assert!(map.unindex(&"middle"));
-
-    let entries = map
-        .iter_ordered()
-        .map(|(key, order_key, value)| (*key, *order_key, *value))
-        .collect::<Vec<_>>();
-
-    assert_eq!(vec![("first", 10, "first"), ("late", 30, "late")], entries);
 }
