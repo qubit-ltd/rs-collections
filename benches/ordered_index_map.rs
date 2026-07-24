@@ -7,7 +7,14 @@
 // =============================================================================
 //! Benchmarks primary-key and ordered-prefix operations.
 
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{
+    BatchSize,
+    BenchmarkId,
+    Criterion,
+    Throughput,
+    criterion_group,
+    criterion_main,
+};
 use qubit_collections::OrderedIndexMap;
 use std::hint::black_box;
 
@@ -48,7 +55,11 @@ fn benchmark_insertion(criterion: &mut Criterion) {
                     OrderedIndexMap::new,
                     |mut map| {
                         for key in 0..entry_count {
-                            map.insert(black_box(key), black_box(key), black_box(key));
+                            map.insert(
+                                black_box(key),
+                                black_box(key),
+                                black_box(key),
+                            );
                         }
                         black_box(map)
                     },
@@ -66,7 +77,8 @@ fn benchmark_insertion(criterion: &mut Criterion) {
 ///
 /// * `criterion` - Criterion benchmark registry.
 fn benchmark_primary_lookup(criterion: &mut Criterion) {
-    let mut group = criterion.benchmark_group("ordered_index_map/primary_lookup");
+    let mut group =
+        criterion.benchmark_group("ordered_index_map/primary_lookup");
     for entry_count in ENTRY_COUNTS {
         let map = populated_map(entry_count);
         group.throughput(Throughput::Elements(entry_count as u64));
@@ -91,7 +103,8 @@ fn benchmark_primary_lookup(criterion: &mut Criterion) {
 ///
 /// * `criterion` - Criterion benchmark registry.
 fn benchmark_unindex_prefix(criterion: &mut Criterion) {
-    let mut group = criterion.benchmark_group("ordered_index_map/unindex_prefix");
+    let mut group =
+        criterion.benchmark_group("ordered_index_map/unindex_prefix");
     for entry_count in ENTRY_COUNTS {
         let upper_bound = entry_count / 2;
         group.throughput(Throughput::Elements((upper_bound + 1) as u64));
@@ -102,7 +115,9 @@ fn benchmark_unindex_prefix(criterion: &mut Criterion) {
                 bencher.iter_batched(
                     || populated_map(entry_count),
                     |mut map| {
-                        let _keys = black_box(map.unindex_through(black_box(&upper_bound)));
+                        let _keys = black_box(
+                            map.unindex_through(black_box(&upper_bound)),
+                        );
                     },
                     BatchSize::SmallInput,
                 );

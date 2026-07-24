@@ -7,10 +7,19 @@
 // =============================================================================
 
 use qubit_collections::OrderedIndexMap;
-use std::hash::{Hash, Hasher};
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::hash::{
+    Hash,
+    Hasher,
+};
+use std::panic::{
+    AssertUnwindSafe,
+    catch_unwind,
+};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{
+    AtomicUsize,
+    Ordering,
+};
 
 /// Primary key that panics on one selected hash invocation.
 #[derive(Clone, Debug)]

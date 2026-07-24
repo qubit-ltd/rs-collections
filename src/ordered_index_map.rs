@@ -9,7 +9,10 @@
 
 use crate::internal::OrderedIndexEntry;
 use std::borrow::Borrow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{
+    BTreeMap,
+    HashMap,
+};
 use std::hash::Hash;
 
 /// A primary-key map with an ordered secondary index.
@@ -430,7 +433,8 @@ where
     #[must_use]
     pub fn first(&self) -> Option<(&K, &O, &V)> {
         self.assert_healthy();
-        let ((order_key, sequence), key) = self.ordered_keys.first_key_value()?;
+        let ((order_key, sequence), key) =
+            self.ordered_keys.first_key_value()?;
         let entry = self
             .entries
             .get(key)
@@ -460,7 +464,8 @@ where
     pub fn pop_first(&mut self) -> Option<(K, O, V)> {
         self.assert_healthy();
         self.poisoned = true;
-        let Some(((order_key, sequence), key)) = self.ordered_keys.pop_first() else {
+        let Some(((order_key, sequence), key)) = self.ordered_keys.pop_first()
+        else {
             self.poisoned = false;
             return None;
         };
@@ -539,7 +544,8 @@ where
     pub fn unindex_first(&mut self) -> Option<(K, O)> {
         self.assert_healthy();
         self.poisoned = true;
-        let Some(((order_key, sequence), key)) = self.ordered_keys.pop_first() else {
+        let Some(((order_key, sequence), key)) = self.ordered_keys.pop_first()
+        else {
             self.poisoned = false;
             return None;
         };
