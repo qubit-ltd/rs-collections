@@ -26,6 +26,9 @@ include = [
 name = "qubit_collections"
 doctest = true
 
+[dependencies]
+hashbrown = { version = "0.17", default-features = false }
+
 [dev-dependencies]
 criterion = { version = "0.8.2", default-features = false }
 

@@ -5,184 +5,269 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! A hash map with an independently managed ordered secondary index.
+//! A primary-key map with an independently managed ordered secondary index.
 
-use crate::internal::OrderedIndexEntry;
+mod detach_range;
+mod extract_range;
+
+pub use detach_range::DetachRange;
+pub use extract_range::ExtractRange;
+
 use std::borrow::Borrow;
-use std::collections::{
-    BTreeMap,
-    HashMap,
+use std::collections::hash_map::RandomState;
+use std::fmt;
+use std::hash::{
+    BuildHasher,
+    Hash,
 };
-use std::hash::Hash;
+use std::ops::{
+    Bound,
+    RangeBounds,
+};
 
-/// A primary-key map with an ordered secondary index.
+use crate::internal::{
+    InternalState,
+    Record,
+    Sequence,
+    SlotId,
+};
+use crate::{
+    DetachedEntryMut,
+    EntryMut,
+    EntryRef,
+    OwnedEntry,
+};
+
+/// Expanded bounds over an order key and its stable sequence.
+type SequenceBounds<O> = (Bound<(O, Sequence)>, Bound<(O, Sequence)>);
+
+/// A primary-key map with an independently managed ordered secondary index.
 ///
-/// Entries are addressable by a unique primary key `K` and ordered by a
-/// possibly non-unique secondary key `O`. Equal secondary keys retain insertion
-/// order. An entry may be removed from the ordered index while remaining
-/// addressable in the primary map.
+/// The primary key is stored exactly once. The ordered index stores private
+/// arena identifiers, so `K` does not need to implement [`Clone`]. Equal order
+/// keys retain attachment order. A record may be detached from ordered
+/// operations while remaining addressable through its primary key.
 ///
-/// It is a logic error for a stored primary key's [`Hash`] or [`Eq`] behavior,
-/// or an indexed order key's [`Ord`] behavior, to change while it is in the
-/// map. This includes changes through interior mutability. As with the standard
-/// map types, the resulting behavior is encapsulated to this instance and may
-/// include panics, incorrect results, or non-termination, but not undefined
-/// behavior.
-///
-/// This type provides no internal synchronization. Callers that share a map
-/// between threads must protect it with an appropriate synchronization
-/// primitive.
+/// This type performs no internal locking. It is [`Send`] and [`Sync`] exactly
+/// when its type parameters and hash builder are, which makes it suitable for
+/// external synchronization with types such as [`std::sync::Mutex`] or
+/// [`std::sync::RwLock`].
 ///
 /// # Panic and Unwind Safety
 ///
-/// Updating two independent indexes cannot provide strong unwind safety when
-/// user implementations of [`Hash`], [`Eq`], [`Ord`], or [`Clone`] panic. A
-/// mutation therefore marks the map as poisoned before its first index update
-/// and clears that marker only after both indexes are consistent. If the
-/// mutation unwinds, later collection operations panic instead of observing a
-/// partially updated index. Discard the poisoned map; replacing it with
-/// [`Default::default`] remains safe.
+/// Cross-index mutations are guarded by a poison flag. If a user-provided
+/// [`Hash`], [`Eq`], [`Ord`], [`Clone`], or destructor implementation panics
+/// after mutation starts, all later operations panic instead of exposing
+/// potentially inconsistent indexes. The poisoned map should be discarded.
 ///
 /// # Type Parameters
 ///
 /// * `K` - Unique primary key type.
-/// * `O` - Ordered secondary key type.
+/// * `O` - Possibly non-unique ordered secondary key type.
 /// * `V` - Stored value type.
-///
-/// # Examples
-///
-/// ```
-/// use qubit_collections::OrderedIndexMap;
-///
-/// let mut deadlines = OrderedIndexMap::new();
-/// deadlines.insert("later", 20, "second");
-/// deadlines.insert("earlier", 10, "first");
-///
-/// assert_eq!(Some((&"earlier", &10, &"first")), deadlines.first());
-/// assert_eq!(vec!["earlier"], deadlines.unindex_through(&10));
-/// assert_eq!(Some(&"first"), deadlines.get("earlier"));
-/// assert_eq!(Some((&"later", &20, &"second")), deadlines.first());
-/// ```
-#[derive(Debug)]
-#[must_use = "the map owns its entries and ordered index"]
-pub struct OrderedIndexMap<K, O, V> {
-    /// Primary records addressed by unique keys.
-    entries: HashMap<K, OrderedIndexEntry<O, V>>,
-    /// Indexed keys ordered by secondary key and stable insertion sequence.
-    ordered_keys: BTreeMap<(O, u64), K>,
-    /// Next stable insertion sequence.
-    next_sequence: u64,
-    /// Whether a prior mutation panicked after a cross-index update began.
+/// * `S` - Hash builder used by the primary index.
+#[must_use = "the map owns its records and ordered index"]
+pub struct OrderedIndexMap<K, O, V, S = RandomState> {
+    /// Owning arena and private indexes.
+    state: InternalState<K, O, V>,
+    /// Hash builder for primary keys.
+    hash_builder: S,
+    /// Whether a cross-index mutation unwound before restoring consistency.
     poisoned: bool,
 }
 
-impl<K, O, V> OrderedIndexMap<K, O, V> {
+impl<K, O, V> OrderedIndexMap<K, O, V, RandomState> {
     /// Creates an empty map.
     ///
     /// # Returns
     ///
-    /// An empty map with no primary records or ordered entries.
+    /// An empty map using a randomly seeded hash builder.
+    #[must_use = "the new map must be retained to store records"]
     #[inline]
     pub fn new() -> Self {
+        Self::with_hasher(RandomState::new())
+    }
+
+    /// Creates an empty map with primary capacity.
+    ///
+    /// # Parameters
+    ///
+    /// * `capacity` - Number of primary records to reserve.
+    ///
+    /// # Returns
+    ///
+    /// An empty map with space for at least `capacity` records.
+    #[must_use = "the new map must be retained to store records"]
+    #[inline]
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self::with_capacity_and_hasher(capacity, RandomState::new())
+    }
+}
+
+impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
+    /// Creates an empty map with a caller-provided hash builder.
+    ///
+    /// # Parameters
+    ///
+    /// * `hash_builder` - Builder used to hash primary keys.
+    ///
+    /// # Returns
+    ///
+    /// An empty map using `hash_builder`.
+    #[must_use = "the new map must be retained to store records"]
+    #[inline]
+    pub const fn with_hasher(hash_builder: S) -> Self {
         Self {
-            entries: HashMap::new(),
-            ordered_keys: BTreeMap::new(),
-            next_sequence: 0,
+            state: InternalState::new(),
+            hash_builder,
             poisoned: false,
         }
     }
 
-    /// Returns the number of primary records, including unindexed entries.
+    /// Creates an empty map with primary capacity and a hash builder.
+    ///
+    /// # Parameters
+    ///
+    /// * `capacity` - Number of primary records to reserve.
+    /// * `hash_builder` - Builder used to hash primary keys.
     ///
     /// # Returns
     ///
-    /// The number of values addressable by primary key.
-    ///
-    /// # Panics
-    ///
-    /// Panics when a previous mutation poisoned the map.
+    /// An empty map configured with both arguments.
+    #[must_use = "the new map must be retained to store records"]
+    #[inline]
+    pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
+        Self {
+            state: InternalState::with_capacity(capacity),
+            hash_builder,
+            poisoned: false,
+        }
+    }
+
+    /// Returns the number of primary records in either attachment state.
     #[must_use]
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.assert_healthy();
-        self.entries.len()
+        self.state.arena.len()
     }
 
     /// Reports whether the primary map contains no records.
-    ///
-    /// # Returns
-    ///
-    /// `true` when no values are addressable by primary key.
-    ///
-    /// # Panics
-    ///
-    /// Panics when a previous mutation poisoned the map.
     #[must_use]
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.assert_healthy();
-        self.entries.is_empty()
+        self.state.arena.len() == 0
     }
 
-    /// Returns the number of records currently in the ordered index.
-    ///
-    /// # Returns
-    ///
-    /// The number of records visible to ordered operations.
-    ///
-    /// # Panics
-    ///
-    /// Panics when a previous mutation poisoned the map.
+    /// Returns the number of records attached to the ordered index.
     #[must_use]
     #[inline(always)]
-    pub fn indexed_len(&self) -> usize {
+    pub fn attached_len(&self) -> usize {
         self.assert_healthy();
-        self.ordered_keys.len()
+        self.state.attached_len
     }
 
     /// Reports whether the ordered index contains no records.
-    ///
-    /// Unindexed primary records do not affect this result.
-    ///
-    /// # Returns
-    ///
-    /// `true` when ordered operations cannot observe an entry.
-    ///
-    /// # Panics
-    ///
-    /// Panics when a previous mutation poisoned the map.
     #[must_use]
     #[inline(always)]
-    pub fn is_index_empty(&self) -> bool {
+    pub fn is_attached_empty(&self) -> bool {
         self.assert_healthy();
-        self.ordered_keys.is_empty()
+        self.state.attached_len == 0
     }
 
-    /// Removes every primary record and ordered-index entry.
-    ///
-    /// The stable insertion sequence is reset because no prior entry remains.
+    /// Returns the number of records accepted without growing primary storage.
+    #[must_use]
+    #[inline(always)]
+    pub fn capacity(&self) -> usize {
+        self.assert_healthy();
+        self.state
+            .arena
+            .capacity()
+            .min(self.state.primary.capacity())
+    }
+
+    /// Removes every record while retaining allocated primary capacity.
     ///
     /// # Panics
     ///
-    /// Panics when a previous mutation poisoned the map or when dropping a
-    /// stored key, order key, or value panics. A panic during clearing poisons
-    /// the map.
+    /// Panics when the map is poisoned or a stored destructor panics.
     #[inline]
     pub fn clear(&mut self) {
+        self.with_mutation(|state, _| {
+            state.primary.clear();
+            state.ordered.clear();
+            state.arena.clear();
+            state.next_sequence = 0;
+            state.attached_len = 0;
+        });
+    }
+
+    /// Returns views of every primary record in unspecified order.
+    ///
+    /// Detached records are included.
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = EntryRef<'_, K, O, V>> {
         self.assert_healthy();
-        self.poisoned = true;
-        self.entries.clear();
-        self.ordered_keys.clear();
-        self.next_sequence = 0;
-        self.poisoned = false;
+        self.state.primary.iter().map(|id| self.entry_ref(*id))
+    }
+
+    /// Returns attached records in ascending secondary-key order.
+    ///
+    /// Equal secondary keys retain attachment order.
+    #[inline]
+    pub fn iter_ordered(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = EntryRef<'_, K, O, V>> + ExactSizeIterator
+    {
+        self.assert_healthy();
+        self.state.ordered.values().map(|id| self.entry_ref(*id))
+    }
+
+    /// Returns attached values in ascending secondary-key order.
+    ///
+    /// Equal secondary keys retain attachment order.
+    #[inline]
+    pub fn values_ordered(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = &V> + ExactSizeIterator {
+        self.iter_ordered().map(|entry| entry.value)
+    }
+
+    /// Returns the first attached record.
+    #[must_use]
+    #[inline]
+    pub fn first(&self) -> Option<EntryRef<'_, K, O, V>>
+    where
+        O: Ord,
+    {
+        self.assert_healthy();
+        let id = *self.state.ordered.first_key_value()?.1;
+        Some(self.entry_ref(id))
+    }
+
+    /// Returns attached records whose order keys fall within `range`.
+    ///
+    /// # Parameters
+    ///
+    /// * `range` - Inclusive or exclusive bounds over secondary keys.
+    #[inline]
+    pub fn range<R>(
+        &self,
+        range: R,
+    ) -> impl DoubleEndedIterator<Item = EntryRef<'_, K, O, V>>
+    where
+        O: Clone + Ord,
+        R: RangeBounds<O>,
+    {
+        self.assert_healthy();
+        self.state
+            .ordered
+            .range(order_range_bounds(&range))
+            .map(|(_, id)| self.entry_ref(*id))
     }
 
     /// Requires that no earlier cross-index mutation unwound.
-    ///
-    /// # Panics
-    ///
-    /// Panics when a previous mutation panicked after it began changing an
-    /// internal index.
     #[inline(always)]
     fn assert_healthy(&self) {
         assert!(
@@ -190,524 +275,609 @@ impl<K, O, V> OrderedIndexMap<K, O, V> {
             "OrderedIndexMap is poisoned after a prior mutation panic",
         );
     }
-}
 
-impl<K, O, V> OrderedIndexMap<K, O, V>
-where
-    K: Eq + Hash + Clone,
-    O: Ord + Clone,
-{
-    /// Inserts or replaces one primary record and indexes its order key.
-    ///
-    /// Replacing an existing primary key assigns a new stable insertion
-    /// sequence, even when the secondary key is unchanged.
-    ///
-    /// # Parameters
-    ///
-    /// * `key` - Unique primary key.
-    /// * `order_key` - Secondary key used by ordered operations.
-    /// * `value` - Value owned by the map.
-    ///
-    /// # Returns
-    ///
-    /// The previous secondary key and value for `key`, or `None` when the key
-    /// was not present.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the map is poisoned, after all supported stable insertion
-    /// sequences are exhausted, when a key trait operation panics, or when an
-    /// internal index invariant has been violated. A panic after index
-    /// mutation begins poisons the map.
-    pub fn insert(&mut self, key: K, order_key: O, value: V) -> Option<(O, V)> {
+    /// Runs one cross-index update under the poison guard.
+    #[inline]
+    fn with_mutation<R>(
+        &mut self,
+        operation: impl FnOnce(&mut InternalState<K, O, V>, &S) -> R,
+    ) -> R {
         self.assert_healthy();
-        let sequence = self.allocate_sequence();
-        let previous = self.remove(&key);
         self.poisoned = true;
-        let previous_ordered_key = self
-            .ordered_keys
-            .insert((order_key.clone(), sequence), key.clone());
-        assert!(
-            previous_ordered_key.is_none(),
-            "ordered index sequence must be unique",
-        );
-        let previous_entry = self.entries.insert(
-            key,
-            OrderedIndexEntry {
-                order_key,
-                sequence: Some(sequence),
-                value,
-            },
-        );
-        assert!(
-            previous_entry.is_none(),
-            "replaced primary entry must be removed before insertion",
-        );
+        let result = operation(&mut self.state, &self.hash_builder);
         self.poisoned = false;
-        previous
+        result
     }
 
-    /// Reports whether a primary key is present.
-    ///
-    /// Indexed and unindexed records are both visible.
-    ///
-    /// # Type Parameters
-    ///
-    /// * `Q` - Borrowed key form accepted by `K` through [`Borrow`].
+    /// Converts one occupied slot into a shared public view.
+    #[inline(always)]
+    fn entry_ref(&self, id: SlotId) -> EntryRef<'_, K, O, V> {
+        let record = self
+            .state
+            .arena
+            .get(id)
+            .expect("primary index must reference an occupied arena slot");
+        EntryRef {
+            key: &record.key,
+            order: &record.order,
+            value: &record.value,
+            state: record.state(),
+        }
+    }
+
+    /// Converts one occupied slot into an exclusive public value view.
+    #[inline(always)]
+    fn entry_mut(&mut self, id: SlotId) -> EntryMut<'_, K, O, V> {
+        let record = self
+            .state
+            .arena
+            .get_mut(id)
+            .expect("primary index must reference an occupied arena slot");
+        let state = record.state();
+        EntryMut {
+            key: &record.key,
+            order: &record.order,
+            value: &mut record.value,
+            state,
+        }
+    }
+
+    /// Converts one detached slot into its specialized value view.
+    #[inline(always)]
+    fn detached_entry_mut(
+        &mut self,
+        id: SlotId,
+    ) -> DetachedEntryMut<'_, K, O, V> {
+        let record = self
+            .state
+            .arena
+            .get_mut(id)
+            .expect("primary index must reference an occupied arena slot");
+        assert!(
+            record.sequence.is_none(),
+            "detached entry view requires a detached record",
+        );
+        DetachedEntryMut {
+            key: &record.key,
+            order: &record.order,
+            value: &mut record.value,
+        }
+    }
+}
+
+impl<K, O, V, S> OrderedIndexMap<K, O, V, S>
+where
+    S: BuildHasher,
+{
+    /// Reserves primary capacity for at least `additional` more records.
     ///
     /// # Parameters
     ///
-    /// * `key` - Borrowed form of the primary key to query.
-    ///
-    /// # Returns
-    ///
-    /// `true` when the primary map contains `key`.
+    /// * `additional` - Additional primary records expected.
     ///
     /// # Panics
     ///
-    /// Panics when the map is poisoned or hashing or comparing `key` panics.
+    /// Panics when capacity overflows, allocation fails, or the map is
+    /// poisoned.
+    pub fn reserve(&mut self, additional: usize)
+    where
+        K: Hash,
+    {
+        self.with_mutation(|state, hash_builder| {
+            state.arena.reserve(additional);
+            let arena = &state.arena;
+            state.primary.reserve(additional, |id| {
+                hash_builder.hash_one(
+                    &arena
+                        .get(*id)
+                        .expect("primary index must reference an occupied arena slot")
+                        .key,
+                )
+            });
+        });
+    }
+
+    /// Reports whether a borrowed primary key is present.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
         Q: Eq + Hash + ?Sized,
     {
-        self.assert_healthy();
-        self.entries.contains_key(key)
+        self.find_slot(key).is_some()
     }
 
-    /// Returns the retained secondary key for a primary key.
-    ///
-    /// The secondary key remains available after the record is unindexed.
-    ///
-    /// # Type Parameters
-    ///
-    /// * `Q` - Borrowed key form accepted by `K` through [`Borrow`].
-    ///
-    /// # Parameters
-    ///
-    /// * `key` - Borrowed form of the primary key to query.
-    ///
-    /// # Returns
-    ///
-    /// `Some(order_key)` for an existing primary record, or `None` when the
-    /// primary key is absent.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the map is poisoned or hashing or comparing `key` panics.
+    /// Returns a stored value by borrowed primary key.
     #[must_use]
-    #[inline(always)]
-    pub fn order_key<Q>(&self, key: &Q) -> Option<&O>
-    where
-        K: Borrow<Q>,
-        Q: Eq + Hash + ?Sized,
-    {
-        self.assert_healthy();
-        self.entries.get(key).map(|entry| &entry.order_key)
-    }
-
-    /// Returns a shared reference to a value by primary key.
-    ///
-    /// Indexed and unindexed records are both visible.
-    ///
-    /// # Type Parameters
-    ///
-    /// * `Q` - Borrowed key form accepted by `K` through [`Borrow`].
-    ///
-    /// # Parameters
-    ///
-    /// * `key` - Borrowed form of the primary key to query.
-    ///
-    /// # Returns
-    ///
-    /// `Some(value)` for an existing primary record, or `None` when the key is
-    /// absent.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the map is poisoned or hashing or comparing `key` panics.
-    #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn get<Q>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,
         Q: Eq + Hash + ?Sized,
     {
-        self.assert_healthy();
-        self.entries.get(key).map(|entry| &entry.value)
+        let id = self.find_slot(key)?;
+        Some(&self.state.arena.get(id)?.value)
     }
 
-    /// Returns an exclusive reference to a value by primary key.
-    ///
-    /// The secondary key cannot be modified through this reference, preserving
-    /// index consistency.
-    ///
-    /// # Type Parameters
-    ///
-    /// * `Q` - Borrowed key form accepted by `K` through [`Borrow`].
-    ///
-    /// # Parameters
-    ///
-    /// * `key` - Borrowed form of the primary key to query.
-    ///
-    /// # Returns
-    ///
-    /// `Some(value)` for an existing primary record, or `None` when the key is
-    /// absent.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the map is poisoned or hashing or comparing `key` panics.
+    /// Returns exclusive value access by borrowed primary key.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
     where
         K: Borrow<Q>,
         Q: Eq + Hash + ?Sized,
     {
-        self.assert_healthy();
-        self.entries.get_mut(key).map(|entry| &mut entry.value)
+        let id = self.find_slot(key)?;
+        Some(&mut self.state.arena.get_mut(id)?.value)
     }
 
-    /// Removes one primary record and any matching ordered-index entry.
-    ///
-    /// # Type Parameters
-    ///
-    /// * `Q` - Borrowed key form accepted by `K` through [`Borrow`].
-    ///
-    /// # Parameters
-    ///
-    /// * `key` - Borrowed form of the primary key to remove.
-    ///
-    /// # Returns
-    ///
-    /// `Some((order_key, value))` for a removed record, or `None` when the key
-    /// was absent.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the map is poisoned, a key trait operation panics, an
-    /// indexed primary record lacks its matching ordered entry, or the ordered
-    /// entry points to a different primary key. A panic after removal begins
-    /// poisons the map.
-    pub fn remove<Q>(&mut self, key: &Q) -> Option<(O, V)>
-    where
-        K: Borrow<Q>,
-        Q: Eq + Hash + ?Sized,
-    {
-        self.assert_healthy();
-        self.poisoned = true;
-        let Some((stored_key, entry)) = self.entries.remove_entry(key) else {
-            self.poisoned = false;
-            return None;
-        };
-        if let Some(sequence) = entry.sequence {
-            let indexed_key = self
-                .ordered_keys
-                .remove(&(entry.order_key.clone(), sequence))
-                .expect("indexed primary record must have an ordered key");
-            assert!(
-                indexed_key == stored_key,
-                "ordered key must point to its primary record",
-            );
-        }
-        self.poisoned = false;
-        Some((entry.order_key, entry.value))
-    }
-
-    /// Returns the smallest secondary key in the ordered index.
-    ///
-    /// Unindexed primary records are ignored.
-    ///
-    /// # Returns
-    ///
-    /// `Some(order_key)` for the first indexed record, or `None` when the
-    /// ordered index is empty.
-    ///
-    /// # Panics
-    ///
-    /// Panics when a previous mutation poisoned the map.
-    #[must_use]
-    #[inline(always)]
-    pub fn first_order_key(&self) -> Option<&O> {
-        self.assert_healthy();
-        self.ordered_keys
-            .first_key_value()
-            .map(|((order_key, _sequence), _key)| order_key)
-    }
-
-    /// Returns the first indexed primary key, secondary key, and value.
-    ///
-    /// Equal secondary keys are returned in insertion order. The returned key
-    /// and secondary key are references to the primary record, rather than to
-    /// copies retained by the ordered index.
-    ///
-    /// # Returns
-    /// `Some((key, order_key, value))` for the first indexed record, or `None`
-    /// when the ordered index is empty.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the map is poisoned, a key trait operation panics, or an
-    /// ordered entry lacks its matching primary record.
-    #[must_use]
-    pub fn first(&self) -> Option<(&K, &O, &V)> {
-        self.assert_healthy();
-        let ((order_key, sequence), key) =
-            self.ordered_keys.first_key_value()?;
-        let (stored_key, entry) = self
-            .entries
-            .get_key_value(key)
-            .expect("ordered key must have a primary record");
-        assert!(
-            entry.sequence == Some(*sequence) && &entry.order_key == order_key,
-            "ordered key metadata must match its primary record",
-        );
-        Some((stored_key, &entry.order_key, &entry.value))
-    }
-
-    /// Iterates indexed records in ascending secondary-key order.
-    ///
-    /// Equal secondary keys are yielded in insertion order. The yielded key and
-    /// secondary key are references to the primary record. Primary records
-    /// detached with [`Self::unindex`] are not yielded.
-    ///
-    /// # Returns
-    ///
-    /// An iterator of `(key, order_key, value)` tuples for every indexed
-    /// record.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the map is poisoned or an ordered entry lacks a matching
-    /// primary record with consistent index metadata.
-    #[must_use]
-    pub fn iter_ordered(
-        &self,
-    ) -> impl DoubleEndedIterator<Item = (&K, &O, &V)> + ExactSizeIterator + '_
-    {
-        self.assert_healthy();
-        self.ordered_keys
-            .iter()
-            .map(move |((order_key, sequence), key)| {
-                let (stored_key, entry) = self
-                    .entries
-                    .get_key_value(key)
-                    .expect("ordered key must have a primary record");
-                assert!(
-                    entry.sequence == Some(*sequence)
-                        && &entry.order_key == order_key,
-                    "ordered key metadata must match its primary record",
-                );
-                (stored_key, &entry.order_key, &entry.value)
-            })
-    }
-
-    /// Removes and returns the first indexed record from both views.
-    ///
-    /// Unindexed primary records are ignored and remain stored.
-    ///
-    /// # Returns
-    ///
-    /// `Some((key, order_key, value))` for the removed first record, or `None`
-    /// when the ordered index is empty.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the map is poisoned, a key trait operation panics, an
-    /// ordered entry lacks its matching primary record, or its metadata
-    /// disagrees with that record. A panic after removal begins poisons the
-    /// map.
-    pub fn pop_first(&mut self) -> Option<(K, O, V)> {
-        self.assert_healthy();
-        self.poisoned = true;
-        let Some(((order_key, sequence), key)) = self.ordered_keys.pop_first()
-        else {
-            self.poisoned = false;
-            return None;
-        };
-        let (stored_key, entry) = self
-            .entries
-            .remove_entry(&key)
-            .expect("ordered key must have a primary record");
-        assert!(
-            entry.sequence == Some(sequence) && entry.order_key == order_key,
-            "ordered key metadata must match its primary record",
-        );
-        self.poisoned = false;
-        Some((stored_key, entry.order_key, entry.value))
-    }
-
-    /// Removes one primary record from the ordered index without deleting it.
-    ///
-    /// # Type Parameters
-    ///
-    /// * `Q` - Borrowed key form accepted by `K` through [`Borrow`].
-    ///
-    /// # Parameters
-    ///
-    /// * `key` - Borrowed form of the primary key to unindex.
-    ///
-    /// # Returns
-    ///
-    /// `true` when an indexed record was detached. Returns `false` when the
-    /// primary key is absent or already unindexed.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the map is poisoned, a key or order-key trait operation
-    /// panics, or the primary record lacks its matching ordered entry. A panic
-    /// after detachment begins poisons the map.
-    #[must_use]
-    pub fn unindex<Q>(&mut self, key: &Q) -> bool
-    where
-        K: Borrow<Q>,
-        Q: Eq + Hash + ?Sized,
-    {
-        self.assert_healthy();
-        let Some((stored_key, entry)) = self.entries.get_key_value(key) else {
-            return false;
-        };
-        let Some(sequence) = entry.sequence else {
-            return false;
-        };
-        let stored_key = stored_key.clone();
-        let order_key = entry.order_key.clone();
-        self.poisoned = true;
-        let indexed_key = self
-            .ordered_keys
-            .remove(&(order_key, sequence))
-            .expect("indexed primary record must have an ordered key");
-        assert!(
-            indexed_key == stored_key,
-            "ordered key must point to its primary record",
-        );
-        self.entries
-            .get_mut(key)
-            .expect("unindexed primary record must remain present")
-            .sequence = None;
-        self.poisoned = false;
-        true
-    }
-
-    /// Removes the first ordered entry while retaining its primary record.
-    ///
-    /// # Returns
-    ///
-    /// `Some((key, order_key))` for the detached first entry, or `None` when
-    /// the ordered index is empty.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the map is poisoned, a key trait operation panics, an
-    /// ordered entry lacks its matching primary record, or its metadata
-    /// disagrees with that record. A panic after detachment begins poisons the
-    /// map.
-    pub fn unindex_first(&mut self) -> Option<(K, O)> {
-        self.assert_healthy();
-        self.poisoned = true;
-        let Some(((order_key, sequence), key)) = self.ordered_keys.pop_first()
-        else {
-            self.poisoned = false;
-            return None;
-        };
-        let entry = self
-            .entries
-            .get_mut(&key)
-            .expect("ordered key must have a primary record");
-        assert!(
-            entry.sequence == Some(sequence) && entry.order_key == order_key,
-            "ordered key metadata must match its primary record",
-        );
-        entry.sequence = None;
-        self.poisoned = false;
-        Some((key, order_key))
-    }
-
-    /// Detaches every ordered entry at or below an inclusive upper bound.
-    ///
-    /// Primary records and their retained secondary keys remain stored.
-    /// Returned keys follow secondary-key and stable insertion order.
-    ///
-    /// # Parameters
-    ///
-    /// * `upper_bound` - Inclusive largest secondary key to detach.
-    ///
-    /// # Returns
-    ///
-    /// Primary keys for all detached entries in ordered-index order.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the map is poisoned, a key or order-key trait operation
-    /// panics, or an ordered entry violates the primary-index invariants. A
-    /// panic during one entry's cross-index update poisons the map; a panic
-    /// between entries can leave an already detached, consistent prefix.
-    pub fn unindex_through(&mut self, upper_bound: &O) -> Vec<K> {
-        self.assert_healthy();
-        let mut detached_keys = Vec::new();
-        while self
-            .first_order_key()
-            .is_some_and(|order_key| order_key <= upper_bound)
-        {
-            let (key, _order_key) = self
-                .unindex_first()
-                .expect("bounded ordered prefix must have a first entry");
-            detached_keys.push(key);
-        }
-        detached_keys
-    }
-
-    /// Allocates a stable sequence for one new ordered entry.
-    ///
-    /// # Returns
-    ///
-    /// A sequence not previously returned since construction or the last
-    /// `clear`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the sequence counter can no longer advance.
+    /// Returns a complete shared record view by borrowed primary key.
     #[must_use]
     #[inline]
-    fn allocate_sequence(&mut self) -> u64 {
-        let sequence = self.next_sequence;
-        self.next_sequence = sequence
-            .checked_add(1)
-            .expect("ordered index insertion sequences exhausted");
-        sequence
+    pub fn get_entry<Q>(&self, key: &Q) -> Option<EntryRef<'_, K, O, V>>
+    where
+        K: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        self.find_slot(key).map(|id| self.entry_ref(id))
+    }
+
+    /// Returns a complete record view with exclusive value access.
+    #[must_use]
+    #[inline]
+    pub fn get_entry_mut<Q>(&mut self, key: &Q) -> Option<EntryMut<'_, K, O, V>>
+    where
+        K: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        let id = self.find_slot(key)?;
+        Some(self.entry_mut(id))
+    }
+
+    /// Finds one arena slot through the primary hash index.
+    #[inline]
+    fn find_slot<Q>(&self, key: &Q) -> Option<SlotId>
+    where
+        K: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        self.assert_healthy();
+        let hash = self.hash_builder.hash_one(key);
+        self.state
+            .primary
+            .find(hash, |id| {
+                self.state
+                    .arena
+                    .get(*id)
+                    .is_some_and(|record| record.key.borrow() == key)
+            })
+            .copied()
     }
 }
 
-impl<K, O, V> Clone for OrderedIndexMap<K, O, V>
+impl<K, O, V, S> OrderedIndexMap<K, O, V, S>
+where
+    K: Eq + Hash,
+    O: Ord + Clone,
+    S: BuildHasher,
+{
+    /// Inserts an attached record or replaces the record with the same key.
+    ///
+    /// Replacement returns the complete old record and its prior attachment
+    /// state. The new record receives a fresh stable attachment sequence.
+    pub fn insert(
+        &mut self,
+        key: K,
+        order: O,
+        value: V,
+    ) -> Option<OwnedEntry<K, O, V>> {
+        self.assert_healthy();
+        let hash = self.hash_builder.hash_one(&key);
+        let previous_id = self.find_slot(&key);
+        let previous_ordered_key = previous_id.and_then(|id| {
+            let record =
+                self.state.arena.get(id).expect(
+                    "primary index must reference an occupied arena slot",
+                );
+            record
+                .sequence
+                .map(|sequence| (record.order.clone(), sequence))
+        });
+        let indexed_order = order.clone();
+
+        self.with_mutation(move |state, hash_builder| {
+            let previous = previous_id.map(|id| {
+                remove_primary_id(state, hash, id);
+                if let Some(ordered_key) = previous_ordered_key {
+                    let removed = state.ordered.remove(&ordered_key);
+                    assert_eq!(removed, Some(id), "ordered index must reference replaced slot");
+                    state.attached_len -= 1;
+                }
+                owned_from_record(
+                    state
+                        .arena
+                        .remove(id)
+                        .expect("replaced primary slot must be occupied"),
+                )
+            });
+
+            let sequence = state.allocate_sequence();
+            let id = state.arena.insert(Record {
+                key,
+                order,
+                value,
+                sequence: Some(sequence),
+            });
+            let arena = &state.arena;
+            state.primary.insert_unique(hash, id, |candidate| {
+                hash_builder.hash_one(
+                    &arena
+                        .get(*candidate)
+                        .expect("primary index must reference an occupied arena slot")
+                        .key,
+                )
+            });
+            let old = state.ordered.insert((indexed_order, sequence), id);
+            assert!(old.is_none(), "ordered index sequence must be unique");
+            state.attached_len += 1;
+            previous
+        })
+    }
+
+    /// Removes and returns a record in either attachment state.
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<OwnedEntry<K, O, V>>
+    where
+        K: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        self.assert_healthy();
+        let hash = self.hash_builder.hash_one(key);
+        let id = self.find_slot(key)?;
+        let ordered_key = {
+            let record =
+                self.state.arena.get(id).expect(
+                    "primary index must reference an occupied arena slot",
+                );
+            record
+                .sequence
+                .map(|sequence| (record.order.clone(), sequence))
+        };
+        Some(self.remove_slot(hash, id, ordered_key))
+    }
+
+    /// Detaches a record from ordered operations while retaining it by key.
+    ///
+    /// Returns `None` when the key is missing or already detached.
+    pub fn detach<Q>(
+        &mut self,
+        key: &Q,
+    ) -> Option<DetachedEntryMut<'_, K, O, V>>
+    where
+        K: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        self.assert_healthy();
+        let id = self.find_slot(key)?;
+        let ordered_key = {
+            let record =
+                self.state.arena.get(id).expect(
+                    "primary index must reference an occupied arena slot",
+                );
+            (record.order.clone(), record.sequence?)
+        };
+        self.detach_slot(id, ordered_key);
+        Some(self.detached_entry_mut(id))
+    }
+
+    /// Attaches a detached record using its retained order.
+    ///
+    /// Returns `None` when the key is missing or already attached.
+    pub fn attach<Q>(&mut self, key: &Q) -> Option<EntryMut<'_, K, O, V>>
+    where
+        K: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        self.assert_healthy();
+        let id = self.find_slot(key)?;
+        let indexed_order = {
+            let record =
+                self.state.arena.get(id).expect(
+                    "primary index must reference an occupied arena slot",
+                );
+            if record.sequence.is_some() {
+                return None;
+            }
+            record.order.clone()
+        };
+        self.with_mutation(|state, _| {
+            let sequence = state.allocate_sequence();
+            let old = state.ordered.insert((indexed_order, sequence), id);
+            assert!(old.is_none(), "ordered index sequence must be unique");
+            state
+                .arena
+                .get_mut(id)
+                .expect("attached primary slot must be occupied")
+                .sequence = Some(sequence);
+            state.attached_len += 1;
+        });
+        Some(self.entry_mut(id))
+    }
+
+    /// Replaces a record's retained order while preserving attachment state.
+    ///
+    /// Attached records receive a fresh stable sequence. Returns the previous
+    /// order, or `None` when the primary key is absent.
+    pub fn set_order<Q>(&mut self, key: &Q, order: O) -> Option<O>
+    where
+        K: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        self.assert_healthy();
+        let id = self.find_slot(key)?;
+        let (old_ordered_key, indexed_order) = {
+            let record =
+                self.state.arena.get(id).expect(
+                    "primary index must reference an occupied arena slot",
+                );
+            (
+                record
+                    .sequence
+                    .map(|sequence| (record.order.clone(), sequence)),
+                record.sequence.map(|_| order.clone()),
+            )
+        };
+        Some(self.with_mutation(|state, _| {
+            let new_sequence =
+                indexed_order.as_ref().map(|_| state.allocate_sequence());
+            if let Some(old_key) = old_ordered_key {
+                let removed = state.ordered.remove(&old_key);
+                assert_eq!(
+                    removed,
+                    Some(id),
+                    "ordered index must reference reordered slot"
+                );
+            }
+            if let (Some(indexed_order), Some(sequence)) =
+                (indexed_order, new_sequence)
+            {
+                let old = state.ordered.insert((indexed_order, sequence), id);
+                assert!(old.is_none(), "ordered index sequence must be unique");
+            }
+            let record = state
+                .arena
+                .get_mut(id)
+                .expect("reordered primary slot must be occupied");
+            record.sequence = new_sequence;
+            std::mem::replace(&mut record.order, order)
+        }))
+    }
+
+    /// Returns a lending cursor that detaches attached records in `range`.
+    ///
+    /// Each `next` or `next_back` call returns exclusive access to the value
+    /// just detached. The cursor keeps the map exclusively borrowed.
+    pub fn detach_range<R>(&mut self, range: R) -> DetachRange<'_, K, O, V, S>
+    where
+        R: RangeBounds<O>,
+    {
+        self.assert_healthy();
+        DetachRange {
+            map: self,
+            start: clone_bound(range.start_bound()),
+            end: clone_bound(range.end_bound()),
+        }
+    }
+
+    /// Returns an iterator that removes attached records in `range`.
+    ///
+    /// Dropping the iterator early leaves records not yet yielded in the map.
+    pub fn extract_range<R>(&mut self, range: R) -> ExtractRange<'_, K, O, V, S>
+    where
+        R: RangeBounds<O>,
+    {
+        self.assert_healthy();
+        ExtractRange {
+            map: self,
+            start: clone_bound(range.start_bound()),
+            end: clone_bound(range.end_bound()),
+        }
+    }
+
+    /// Removes and returns the first attached record.
+    pub fn pop_first(&mut self) -> Option<OwnedEntry<K, O, V>> {
+        self.assert_healthy();
+        let (ordered_key, id) = self
+            .state
+            .ordered
+            .first_key_value()
+            .map(|(key, id)| (key.clone(), *id))?;
+        let hash = {
+            let record =
+                self.state.arena.get(id).expect(
+                    "ordered index must reference an occupied arena slot",
+                );
+            self.hash_builder.hash_one(&record.key)
+        };
+        Some(self.remove_slot(hash, id, Some(ordered_key)))
+    }
+
+    /// Detaches one slot with a prevalidated ordered-index key.
+    fn detach_slot(&mut self, id: SlotId, ordered_key: (O, Sequence)) {
+        self.with_mutation(|state, _| {
+            let removed = state.ordered.remove(&ordered_key);
+            assert_eq!(
+                removed,
+                Some(id),
+                "ordered index must reference detached slot"
+            );
+            state
+                .arena
+                .get_mut(id)
+                .expect("detached primary slot must be occupied")
+                .sequence = None;
+            state.attached_len -= 1;
+        });
+    }
+
+    /// Removes one slot and both of its index references.
+    fn remove_slot(
+        &mut self,
+        hash: u64,
+        id: SlotId,
+        ordered_key: Option<(O, Sequence)>,
+    ) -> OwnedEntry<K, O, V> {
+        self.with_mutation(|state, _| {
+            remove_primary_id(state, hash, id);
+            if let Some(ordered_key) = ordered_key {
+                let removed = state.ordered.remove(&ordered_key);
+                assert_eq!(
+                    removed,
+                    Some(id),
+                    "ordered index must reference removed slot"
+                );
+                state.attached_len -= 1;
+            }
+            owned_from_record(
+                state
+                    .arena
+                    .remove(id)
+                    .expect("removed primary slot must be occupied"),
+            )
+        })
+    }
+}
+
+impl<K, O, V, S> Default for OrderedIndexMap<K, O, V, S>
+where
+    S: Default,
+{
+    /// Creates an empty map with the hash builder's default value.
+    #[inline]
+    fn default() -> Self {
+        Self::with_hasher(S::default())
+    }
+}
+
+impl<K, O, V, S> Clone for OrderedIndexMap<K, O, V, S>
 where
     K: Clone,
     O: Clone,
     V: Clone,
+    S: Clone,
 {
-    /// Clones both consistent index views and their sequence state.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the source map is poisoned or a stored key, order key, or
-    /// value panics while being cloned.
     fn clone(&self) -> Self {
         self.assert_healthy();
         Self {
-            entries: self.entries.clone(),
-            ordered_keys: self.ordered_keys.clone(),
-            next_sequence: self.next_sequence,
+            state: self.state.clone(),
+            hash_builder: self.hash_builder.clone(),
             poisoned: false,
         }
     }
 }
 
-impl<K, O, V> Default for OrderedIndexMap<K, O, V> {
-    /// Creates an empty map.
-    #[inline]
-    fn default() -> Self {
-        Self::new()
+impl<K, O, V, S> fmt::Debug for OrderedIndexMap<K, O, V, S>
+where
+    K: fmt::Debug,
+    O: fmt::Debug,
+    V: fmt::Debug,
+    S: fmt::Debug,
+{
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.assert_healthy();
+        formatter
+            .debug_struct("OrderedIndexMap")
+            .field("state", &self.state)
+            .field("hash_builder", &self.hash_builder)
+            .finish()
     }
+}
+
+/// Removes one exact slot identifier from the primary hash index.
+fn remove_primary_id<K, O, V>(
+    state: &mut InternalState<K, O, V>,
+    hash: u64,
+    id: SlotId,
+) {
+    let entry = state
+        .primary
+        .find_entry(hash, |candidate| *candidate == id)
+        .expect("primary index must reference removed slot");
+    let (removed, _) = entry.remove();
+    assert_eq!(removed, id, "primary index removed an unexpected slot");
+}
+
+/// Converts a private arena record into its public owned representation.
+fn owned_from_record<K, O, V>(record: Record<K, O, V>) -> OwnedEntry<K, O, V> {
+    let state = record.state();
+    OwnedEntry {
+        key: record.key,
+        order: record.order,
+        value: record.value,
+        state,
+    }
+}
+
+/// Clones one borrowed range bound.
+fn clone_bound<T: Clone>(bound: Bound<&T>) -> Bound<T> {
+    match bound {
+        Bound::Included(value) => Bound::Included(value.clone()),
+        Bound::Excluded(value) => Bound::Excluded(value.clone()),
+        Bound::Unbounded => Bound::Unbounded,
+    }
+}
+
+/// Expands order bounds to cover all stable sequences for matching orders.
+fn order_range_bounds<O, R>(range: &R) -> SequenceBounds<O>
+where
+    O: Clone,
+    R: RangeBounds<O>,
+{
+    (
+        match range.start_bound() {
+            Bound::Included(order) => {
+                Bound::Included((order.clone(), Sequence(0)))
+            }
+            Bound::Excluded(order) => {
+                Bound::Excluded((order.clone(), Sequence(u64::MAX)))
+            }
+            Bound::Unbounded => Bound::Unbounded,
+        },
+        match range.end_bound() {
+            Bound::Included(order) => {
+                Bound::Included((order.clone(), Sequence(u64::MAX)))
+            }
+            Bound::Excluded(order) => {
+                Bound::Excluded((order.clone(), Sequence(0)))
+            }
+            Bound::Unbounded => Bound::Unbounded,
+        },
+    )
+}
+
+/// Expands owned order bounds to cover all stable sequences.
+fn sequence_bounds<O: Clone>(
+    start: &Bound<O>,
+    end: &Bound<O>,
+) -> SequenceBounds<O> {
+    (
+        match start {
+            Bound::Included(order) => {
+                Bound::Included((order.clone(), Sequence(0)))
+            }
+            Bound::Excluded(order) => {
+                Bound::Excluded((order.clone(), Sequence(u64::MAX)))
+            }
+            Bound::Unbounded => Bound::Unbounded,
+        },
+        match end {
+            Bound::Included(order) => {
+                Bound::Included((order.clone(), Sequence(u64::MAX)))
+            }
+            Bound::Excluded(order) => {
+                Bound::Excluded((order.clone(), Sequence(0)))
+            }
+            Bound::Unbounded => Bound::Unbounded,
+        },
+    )
 }
