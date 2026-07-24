@@ -251,6 +251,10 @@ where
     ///
     /// Indexed and unindexed records are both visible.
     ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key form accepted by `K` through [`Borrow`].
+    ///
     /// # Parameters
     ///
     /// * `key` - Borrowed form of the primary key to query.
@@ -276,6 +280,10 @@ where
     /// Returns the retained secondary key for a primary key.
     ///
     /// The secondary key remains available after the record is unindexed.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key form accepted by `K` through [`Borrow`].
     ///
     /// # Parameters
     ///
@@ -303,6 +311,10 @@ where
     /// Returns a shared reference to a value by primary key.
     ///
     /// Indexed and unindexed records are both visible.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key form accepted by `K` through [`Borrow`].
     ///
     /// # Parameters
     ///
@@ -332,6 +344,10 @@ where
     /// The secondary key cannot be modified through this reference, preserving
     /// index consistency.
     ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key form accepted by `K` through [`Borrow`].
+    ///
     /// # Parameters
     ///
     /// * `key` - Borrowed form of the primary key to query.
@@ -356,6 +372,10 @@ where
     }
 
     /// Removes one primary record and any matching ordered-index entry.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key form accepted by `K` through [`Borrow`].
     ///
     /// # Parameters
     ///
@@ -420,7 +440,9 @@ where
 
     /// Returns the first indexed primary key, secondary key, and value.
     ///
-    /// Equal secondary keys are returned in insertion order.
+    /// Equal secondary keys are returned in insertion order. The returned key
+    /// and secondary key are references to the primary record, rather than to
+    /// copies retained by the ordered index.
     ///
     /// # Returns
     /// `Some((key, order_key, value))` for the first indexed record, or `None`
@@ -435,15 +457,52 @@ where
         self.assert_healthy();
         let ((order_key, sequence), key) =
             self.ordered_keys.first_key_value()?;
-        let entry = self
+        let (stored_key, entry) = self
             .entries
-            .get(key)
+            .get_key_value(key)
             .expect("ordered key must have a primary record");
         assert!(
             entry.sequence == Some(*sequence) && &entry.order_key == order_key,
             "ordered key metadata must match its primary record",
         );
-        Some((key, order_key, &entry.value))
+        Some((stored_key, &entry.order_key, &entry.value))
+    }
+
+    /// Iterates indexed records in ascending secondary-key order.
+    ///
+    /// Equal secondary keys are yielded in insertion order. The yielded key and
+    /// secondary key are references to the primary record. Primary records
+    /// detached with [`Self::unindex`] are not yielded.
+    ///
+    /// # Returns
+    ///
+    /// An iterator of `(key, order_key, value)` tuples for every indexed
+    /// record.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the map is poisoned or an ordered entry lacks a matching
+    /// primary record with consistent index metadata.
+    #[must_use]
+    pub fn iter_ordered(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (&K, &O, &V)> + ExactSizeIterator + '_
+    {
+        self.assert_healthy();
+        self.ordered_keys
+            .iter()
+            .map(move |((order_key, sequence), key)| {
+                let (stored_key, entry) = self
+                    .entries
+                    .get_key_value(key)
+                    .expect("ordered key must have a primary record");
+                assert!(
+                    entry.sequence == Some(*sequence)
+                        && &entry.order_key == order_key,
+                    "ordered key metadata must match its primary record",
+                );
+                (stored_key, &entry.order_key, &entry.value)
+            })
     }
 
     /// Removes and returns the first indexed record from both views.
@@ -469,7 +528,7 @@ where
             self.poisoned = false;
             return None;
         };
-        let (_stored_key, entry) = self
+        let (stored_key, entry) = self
             .entries
             .remove_entry(&key)
             .expect("ordered key must have a primary record");
@@ -478,10 +537,14 @@ where
             "ordered key metadata must match its primary record",
         );
         self.poisoned = false;
-        Some((key, order_key, entry.value))
+        Some((stored_key, entry.order_key, entry.value))
     }
 
     /// Removes one primary record from the ordered index without deleting it.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key form accepted by `K` through [`Borrow`].
     ///
     /// # Parameters
     ///
@@ -497,6 +560,7 @@ where
     /// Panics when the map is poisoned, a key or order-key trait operation
     /// panics, or the primary record lacks its matching ordered entry. A panic
     /// after detachment begins poisons the map.
+    #[must_use]
     pub fn unindex<Q>(&mut self, key: &Q) -> bool
     where
         K: Borrow<Q>,
