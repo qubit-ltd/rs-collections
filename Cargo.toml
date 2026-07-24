@@ -1,0 +1,34 @@
+[package]
+name = "qubit-collections"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+authors = ["Haixing Hu <starfish.hu@gmail.com>"]
+license = "Apache-2.0"
+repository = "https://github.com/qubit-ltd/rs-collections"
+description = "Focused collection types with explicitly maintained secondary indexes"
+homepage = "https://github.com/qubit-ltd/rs-collections"
+documentation = "https://docs.rs/qubit-collections"
+readme = "README.md"
+keywords = ["collections", "index", "ordered", "map", "qubit"]
+categories = ["data-structures"]
+include = [
+    "/Cargo.toml",
+    "/LICENSE",
+    "/README.md",
+    "/README.zh_CN.md",
+    "/benches/**",
+    "/src/**",
+    "/tests/**",
+]
+
+[lib]
+name = "qubit_collections"
+doctest = true
+
+[dev-dependencies]
+criterion = { version = "0.8.2", default-features = false }
+
+[[bench]]
+name = "ordered_index_map"
+harness = false
