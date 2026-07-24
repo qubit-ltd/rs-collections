@@ -13,20 +13,24 @@
 
 Qubit Collections 的第一个类型是 `OrderedIndexMap<K, O, V>`：它在主键
 Map 之外维护一个可独立管理的有序次级索引。它支持按 `K` 快速查找、按 `O`
-取得最早对象或有界前缀、重复有序键的稳定插入顺序，以及退出有序索引后仍保留
-在主 Map 中的对象。
+取得最早对象或有界区间、重复有序键的稳定挂载顺序、显式的挂载/分离状态，以及
+退出有序索引后仍保留在主 Map 中的对象。主键只存储一次，并且不要求实现
+`Clone`。
 
-本 crate 没有运行时依赖，也不提供内部同步。跨线程共享时，应由所有者使用符合
-其并发模型的同步原语包装。
+本 crate 使用 `hashbrown` 的底层哈希表抽象维护私有主键索引。它不使用
+`slotmap`：由于槽位标识永远不会离开 Map，私有的 `Vec<Option<_>>` arena
+已经足够。本 crate 不提供内部同步；当所有组成类型都满足条件时，Map 会自动
+实现 `Send` 和 `Sync`。需要共享可变访问时，应由所有者使用符合其并发模型的
+同步原语包装。
 
 ## 复杂度
 
 | 操作 | 复杂度 |
 |---|---|
 | 按主键查询或修改值 | 平均 `O(1)` |
-| 查看最小的已索引有序键 | `O(log n)` |
-| 插入、替换、删除或解除一个索引项 | `O(log n)` |
-| 解除包含 `k` 个对象的有界前缀 | `O(k log n)` |
+| 查看最小的已挂载记录 | `O(log n)` |
+| 插入、替换、删除、挂载、分离或重新排序记录 | `O(log n)` |
+| 分离或提取包含 `k` 个对象的区间 | `O(k log n)` |
 | 空间 | `O(n)` |
 
 ## 安装
@@ -45,23 +49,31 @@ let mut deadlines = OrderedIndexMap::new();
 deadlines.insert("later", 20, "second");
 deadlines.insert("earlier", 10, "first");
 
-assert_eq!(Some((&"earlier", &10, &"first")), deadlines.first());
-assert_eq!(vec!["earlier"], deadlines.unindex_through(&10));
+let first = deadlines.first().expect("存在已挂载的截止时间");
+assert_eq!(&"earlier", first.key());
 
-// 解除索引只影响有序视图。
+// 分离只影响有序视图，并直接提供值访问。
+let detached = deadlines.detach("earlier").expect("记录已挂载");
+assert_eq!(&"first", detached.value());
+drop(detached);
 assert_eq!(Some(&"first"), deadlines.get("earlier"));
-assert_eq!(Some((&"later", &20, &"second")), deadlines.first());
+assert_eq!(
+    vec![&"second"],
+    deadlines.values_ordered().collect::<Vec<_>>(),
+);
 ```
 
 ## 索引生命周期
 
-每次插入都会进入有序索引。`pop_first` 和 `remove` 删除完整记录；
-`unindex`、`unindex_first` 和 `unindex_through` 只删除有序索引项。主记录
-会保留原始有序键，并继续通过 `get`、`get_mut`、`order_key` 和 `remove`
-访问。
+每次插入都会挂载到有序索引。`pop_first`、`remove` 和 `extract_range`
+删除完整记录。`detach` 和 `detach_range` 保留主记录，并且无需再次进行
+哈希查询即可访问值；`attach` 恢复有序可见性。`set_order` 在保留挂载状态的
+同时修改有序键。
 
-`get_mut` 不允许修改有序键；在不重建次级索引的情况下修改它会破坏 Map
-不变量。
+`get_entry`、`iter`、`iter_ordered`、`range` 和 `first` 会公开记录的
+主键、有序键、值与 `IndexState`。下游只需要值时可直接使用
+`values_ordered`。主键和有序键不能直接修改，因为不重建相应索引的修改会破坏
+集合不变量。
 
 如果用户定义的键 trait 在跨索引修改过程中 panic，Map 会进入中毒状态并拒绝
 后续操作。此时应丢弃该实例，避免读取只完成了一半的索引更新。
