@@ -9,6 +9,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{
+    BuildHasherDefault,
     Hash,
     Hasher,
 };
@@ -24,13 +25,123 @@ use std::sync::atomic::{
 };
 
 use qubit_collections::{
+    ExtractRange,
     IndexState,
     OrderedIndexMap,
+    TryInsertError,
 };
 
 /// Primary key that intentionally does not implement [`Clone`].
 #[derive(Debug, Eq, Hash, PartialEq)]
 struct NonCloneKey(u64);
+
+/// Primary key that implements hashing without equality.
+#[derive(Hash)]
+struct HashOnlyKey;
+
+/// Order key that supports ordering without cloning.
+#[derive(Eq, Ord, PartialEq, PartialOrd)]
+struct NonCloneOrder;
+
+/// Hasher that deliberately maps every key to one collision bucket.
+#[derive(Default)]
+struct ConstantHasher;
+
+impl Hasher for ConstantHasher {
+    fn finish(&self) -> u64 {
+        0
+    }
+
+    fn write(&mut self, _bytes: &[u8]) {}
+}
+
+/// Hash builder used to force equality checks during lookup.
+type ConstantBuildHasher = BuildHasherDefault<ConstantHasher>;
+
+/// Primary key that can panic during equality checks.
+#[derive(Clone, Debug)]
+struct PanicEq {
+    /// Logical key value.
+    value: u64,
+    /// Whether equality checks must panic.
+    panic: Arc<AtomicBool>,
+}
+
+impl PartialEq for PanicEq {
+    fn eq(&self, other: &Self) -> bool {
+        assert!(
+            !self.panic.load(AtomicOrdering::SeqCst)
+                && !other.panic.load(AtomicOrdering::SeqCst),
+            "intentional equality panic",
+        );
+        self.value == other.value
+    }
+}
+
+impl Eq for PanicEq {}
+
+impl Hash for PanicEq {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.value.hash(state);
+    }
+}
+
+/// Order key that can panic while being cloned.
+#[derive(Debug)]
+struct PanicCloneOrder {
+    /// Logical order value.
+    value: u64,
+    /// Whether cloning must panic.
+    panic: Arc<AtomicBool>,
+}
+
+impl Clone for PanicCloneOrder {
+    fn clone(&self) -> Self {
+        assert!(
+            !self.panic.load(AtomicOrdering::SeqCst),
+            "intentional order clone panic",
+        );
+        Self {
+            value: self.value,
+            panic: Arc::clone(&self.panic),
+        }
+    }
+}
+
+impl PartialEq for PanicCloneOrder {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl Eq for PanicCloneOrder {}
+
+impl PartialOrd for PanicCloneOrder {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PanicCloneOrder {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.value.cmp(&other.value)
+    }
+}
+
+/// Stored value that can panic while being destroyed.
+struct PanicDrop {
+    /// Whether destruction must panic.
+    panic: Arc<AtomicBool>,
+}
+
+impl Drop for PanicDrop {
+    fn drop(&mut self) {
+        assert!(
+            !self.panic.load(AtomicOrdering::SeqCst),
+            "intentional destructor panic",
+        );
+    }
+}
 
 /// Order key that can panic while an ordered index is being changed.
 #[derive(Clone, Debug)]
@@ -91,6 +202,12 @@ impl Hash for PanicHash {
         self.value.hash(state);
     }
 }
+
+/// Requires a type to implement the standard error trait.
+fn assert_std_error<T: std::error::Error>() {}
+
+/// Requires a type to implement double-ended iteration.
+fn assert_double_ended_iterator<T: DoubleEndedIterator>() {}
 
 /// Minimal model record used by the bounded mixed-operation test.
 #[derive(Clone, Debug)]
@@ -238,6 +355,35 @@ fn test_ordered_index_map_try_insert_rejects_duplicate_without_mutation() {
 }
 
 #[test]
+fn test_try_insert_error_implements_standard_error_traits() {
+    assert_std_error::<TryInsertError<u64, u64, &'static str>>();
+
+    let mut map = OrderedIndexMap::new();
+    map.insert(1, 10, "stored");
+    let error = map
+        .try_insert(1, 20, "rejected")
+        .expect_err("occupied key should return an error");
+
+    assert_eq!("primary key is already present", error.to_string());
+    assert!(std::error::Error::source(&error).is_none());
+}
+
+#[test]
+fn test_extract_range_double_ended_iterator_does_not_require_key_equality() {
+    assert_double_ended_iterator::<
+        ExtractRange<'static, HashOnlyKey, u64, &'static str>,
+    >();
+}
+
+#[test]
+fn test_pop_first_does_not_require_key_equality_or_order_cloning() {
+    let mut map =
+        OrderedIndexMap::<HashOnlyKey, NonCloneOrder, &'static str>::new();
+
+    assert!(map.pop_first().is_none());
+}
+
+#[test]
 fn test_ordered_index_map_supports_non_clone_primary_keys() {
     let mut map = OrderedIndexMap::new();
     assert!(map.insert(NonCloneKey(1), 10_u64, "value").is_none());
@@ -360,6 +506,27 @@ fn test_ordered_index_map_equal_orders_are_stable() {
     assert_eq!(1, map.pop_first().expect("second record").into_key());
     assert_eq!(3, map.pop_first().expect("third record").into_key());
     assert!(map.pop_first().is_none());
+}
+
+#[test]
+fn test_ordered_index_map_pop_first_does_not_clone_order() {
+    let panic = Arc::new(AtomicBool::new(false));
+    let mut map = OrderedIndexMap::new();
+    map.insert(
+        1,
+        PanicCloneOrder {
+            value: 1,
+            panic: Arc::clone(&panic),
+        },
+        "value",
+    );
+    panic.store(true, AtomicOrdering::SeqCst);
+
+    let removed = map.pop_first().expect("first record should be removed");
+
+    panic.store(false, AtomicOrdering::SeqCst);
+    assert_eq!(1, removed.into_key());
+    assert!(map.is_empty());
 }
 
 #[test]
@@ -659,6 +826,66 @@ fn test_ordered_index_map_preflight_hash_panic_does_not_poison() {
 }
 
 #[test]
+fn test_ordered_index_map_preflight_equality_panic_does_not_poison() {
+    let panic = Arc::new(AtomicBool::new(false));
+    let mut map = OrderedIndexMap::with_hasher(ConstantBuildHasher::default());
+    map.insert(
+        PanicEq {
+            value: 1,
+            panic: Arc::clone(&panic),
+        },
+        1,
+        "value",
+    );
+    panic.store(true, AtomicOrdering::SeqCst);
+
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            let _ = map.get(&PanicEq {
+                value: 2,
+                panic: Arc::clone(&panic),
+            });
+        }))
+        .is_err(),
+    );
+    panic.store(false, AtomicOrdering::SeqCst);
+    assert_eq!(1, map.len());
+    assert_eq!(Some(&"value"), map.get(&PanicEq { value: 1, panic }),);
+}
+
+#[test]
+fn test_ordered_index_map_preflight_clone_panic_does_not_poison() {
+    let panic = Arc::new(AtomicBool::new(false));
+    let mut map = OrderedIndexMap::new();
+    map.insert(
+        1,
+        PanicCloneOrder {
+            value: 1,
+            panic: Arc::clone(&panic),
+        },
+        "first",
+    );
+    panic.store(true, AtomicOrdering::SeqCst);
+
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            map.insert(
+                2,
+                PanicCloneOrder {
+                    value: 2,
+                    panic: Arc::clone(&panic),
+                },
+                "second",
+            );
+        }))
+        .is_err(),
+    );
+    panic.store(false, AtomicOrdering::SeqCst);
+    assert_eq!(1, map.len());
+    assert_eq!(Some(&"first"), map.get(&1));
+}
+
+#[test]
 fn test_ordered_index_map_poisoned_after_reserve_hash_panic() {
     let panic = Arc::new(AtomicBool::new(false));
     let mut map = OrderedIndexMap::new();
@@ -673,6 +900,24 @@ fn test_ordered_index_map_poisoned_after_reserve_hash_panic() {
     panic.store(true, AtomicOrdering::SeqCst);
 
     assert!(catch_unwind(AssertUnwindSafe(|| map.reserve(1_024))).is_err(),);
+    assert!(catch_unwind(AssertUnwindSafe(|| map.len())).is_err());
+}
+
+#[test]
+fn test_ordered_index_map_poisoned_after_destructor_panic() {
+    let panic = Arc::new(AtomicBool::new(false));
+    let mut map = OrderedIndexMap::new();
+    map.insert(
+        1,
+        1,
+        PanicDrop {
+            panic: Arc::clone(&panic),
+        },
+    );
+    panic.store(true, AtomicOrdering::SeqCst);
+
+    assert!(catch_unwind(AssertUnwindSafe(|| map.clear())).is_err());
+    panic.store(false, AtomicOrdering::SeqCst);
     assert!(catch_unwind(AssertUnwindSafe(|| map.len())).is_err());
 }
 

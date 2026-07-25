@@ -87,9 +87,10 @@ both excluded. Dropping `detach_range` or `extract_range` early affects only
 records already yielded. Attachment order uses a `u64` sequence; exhausting it
 panics, while `clear` resets the sequence allocator.
 
-If a user-defined key trait panics while a cross-index mutation is in progress,
-the map becomes poisoned and rejects later operations. Discard that instance
-instead of observing a partially updated index.
+If user-provided hashing, equality, ordering, cloning, or destruction code
+panics after a cross-index mutation starts, the map becomes poisoned and
+rejects later operations. Discard that instance instead of observing a
+partially updated index.
 
 ## Testing
 

@@ -127,6 +127,10 @@ impl<K, O, V> OrderedIndexMap<K, O, V, RandomState> {
     /// # Returns
     ///
     /// An empty map with space for at least `capacity` records.
+    ///
+    /// # Panics
+    ///
+    /// Panics if reserving `capacity` records overflows or allocation fails.
     #[must_use = "the new map must be retained to store records"]
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
@@ -164,6 +168,10 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     /// # Returns
     ///
     /// An empty map configured with both arguments.
+    ///
+    /// # Panics
+    ///
+    /// Panics if reserving `capacity` records overflows or allocation fails.
     #[must_use = "the new map must be retained to store records"]
     #[inline]
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
@@ -175,6 +183,14 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     }
 
     /// Returns the number of primary records in either attachment state.
+    ///
+    /// # Returns
+    ///
+    /// The total number of attached and detached records.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned.
     #[must_use]
     #[inline(always)]
     pub fn len(&self) -> usize {
@@ -183,6 +199,14 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     }
 
     /// Reports whether the primary map contains no records.
+    ///
+    /// # Returns
+    ///
+    /// `true` when the map has neither attached nor detached records.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned.
     #[must_use]
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
@@ -191,6 +215,14 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     }
 
     /// Returns the number of records attached to the ordered index.
+    ///
+    /// # Returns
+    ///
+    /// The number of records visible through ordered operations.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned.
     #[must_use]
     #[inline(always)]
     pub fn attached_len(&self) -> usize {
@@ -199,6 +231,14 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     }
 
     /// Reports whether the ordered index contains no records.
+    ///
+    /// # Returns
+    ///
+    /// `true` when no record is attached to the ordered index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned.
     #[must_use]
     #[inline(always)]
     pub fn is_attached_empty(&self) -> bool {
@@ -207,6 +247,14 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     }
 
     /// Returns the number of records accepted without growing primary storage.
+    ///
+    /// # Returns
+    ///
+    /// The shared capacity supported by both primary storage structures.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned.
     #[must_use]
     #[inline(always)]
     pub fn capacity(&self) -> usize {
@@ -235,6 +283,14 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     /// Returns views of every primary record in unspecified order.
     ///
     /// Detached records are included.
+    ///
+    /// # Returns
+    ///
+    /// An iterator over all attached and detached records.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned.
     #[inline]
     pub fn iter(&self) -> impl Iterator<Item = EntryRef<'_, K, O, V>> {
         self.assert_healthy();
@@ -244,6 +300,14 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     /// Returns attached records in ascending secondary-key order.
     ///
     /// Equal secondary keys retain attachment order.
+    ///
+    /// # Returns
+    ///
+    /// A double-ended, exact-size iterator over attached records.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned.
     #[inline]
     pub fn iter_ordered(
         &self,
@@ -256,6 +320,14 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     /// Returns attached values in ascending secondary-key order.
     ///
     /// Equal secondary keys retain attachment order.
+    ///
+    /// # Returns
+    ///
+    /// A double-ended, exact-size iterator over attached values.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned.
     #[inline]
     pub fn values_ordered(
         &self,
@@ -264,6 +336,14 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     }
 
     /// Returns the first attached record.
+    ///
+    /// # Returns
+    ///
+    /// The lowest ordered record, or `None` when no record is attached.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned.
     #[must_use]
     #[inline]
     pub fn first(&self) -> Option<EntryRef<'_, K, O, V>>
@@ -397,8 +477,9 @@ where
     ///
     /// # Panics
     ///
-    /// Panics when capacity overflows, allocation fails, or the map is
-    /// poisoned.
+    /// Panics when capacity overflows, allocation fails, the map is poisoned,
+    /// or hashing a stored key panics. A panic after reservation starts
+    /// poisons the map.
     pub fn reserve(&mut self, additional: usize)
     where
         K: Hash,
@@ -418,6 +499,18 @@ where
     }
 
     /// Reports whether a borrowed primary key is present.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to locate.
+    ///
+    /// # Returns
+    ///
+    /// `true` when the primary index contains an equivalent key.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or hashing or comparing `key` panics.
     #[must_use]
     #[inline]
     pub fn contains_key<Q>(&self, key: &Q) -> bool
@@ -429,6 +522,18 @@ where
     }
 
     /// Returns a stored value by borrowed primary key.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to locate.
+    ///
+    /// # Returns
+    ///
+    /// The stored value, or `None` when `key` is absent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or hashing or comparing `key` panics.
     #[must_use]
     #[inline]
     pub fn get<Q>(&self, key: &Q) -> Option<&V>
@@ -441,6 +546,18 @@ where
     }
 
     /// Returns exclusive value access by borrowed primary key.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to locate.
+    ///
+    /// # Returns
+    ///
+    /// Exclusive access to the stored value, or `None` when `key` is absent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or hashing or comparing `key` panics.
     #[must_use]
     #[inline]
     pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
@@ -453,6 +570,18 @@ where
     }
 
     /// Returns a complete shared record view by borrowed primary key.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to locate.
+    ///
+    /// # Returns
+    ///
+    /// A shared record view, or `None` when `key` is absent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or hashing or comparing `key` panics.
     #[must_use]
     #[inline]
     pub fn get_entry<Q>(&self, key: &Q) -> Option<EntryRef<'_, K, O, V>>
@@ -464,6 +593,19 @@ where
     }
 
     /// Returns a complete record view with exclusive value access.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to locate.
+    ///
+    /// # Returns
+    ///
+    /// A record view with exclusive value access, or `None` when `key` is
+    /// absent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or hashing or comparing `key` panics.
     #[must_use]
     #[inline]
     pub fn get_entry_mut<Q>(&mut self, key: &Q) -> Option<EntryMut<'_, K, O, V>>
@@ -506,6 +648,23 @@ where
     ///
     /// Replacement returns the complete old record and its prior attachment
     /// state. The new record receives a fresh stable attachment sequence.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Unique primary key for the new record.
+    /// * `order` - Ordered secondary key for the new record.
+    /// * `value` - Value stored by the new record.
+    ///
+    /// # Returns
+    ///
+    /// The replaced record in its prior attachment state, or `None` when
+    /// `key` was vacant.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned, stable sequence allocation is exhausted,
+    /// or user-provided hashing, equality, ordering, cloning, or destruction
+    /// code panics. A panic after mutation starts poisons the map.
     pub fn insert(
         &mut self,
         key: K,
@@ -579,6 +738,11 @@ where
     /// An exclusive view of the inserted record, or a [`TryInsertError`]
     /// containing the rejected key, order, and value when `key` is occupied.
     ///
+    /// # Errors
+    ///
+    /// Returns [`TryInsertError`] containing the untouched input when `key`
+    /// already exists.
+    ///
     /// # Panics
     ///
     /// Panics if the map is poisoned, if stable sequence allocation is
@@ -621,6 +785,21 @@ where
     }
 
     /// Removes and returns a record in either attachment state.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to remove.
+    ///
+    /// # Returns
+    ///
+    /// The removed record and its prior attachment state, or `None` when
+    /// `key` is absent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or user-provided hashing, equality,
+    /// ordering, cloning, or destruction code panics. A panic after mutation
+    /// starts poisons the map.
     pub fn remove<Q>(&mut self, key: &Q) -> Option<OwnedEntry<K, O, V>>
     where
         K: Borrow<Q>,
@@ -643,7 +822,20 @@ where
 
     /// Detaches a record from ordered operations while retaining it by key.
     ///
-    /// Returns `None` when the key is missing or already detached.
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to detach.
+    ///
+    /// # Returns
+    ///
+    /// Exclusive value access for the detached record, or `None` when `key` is
+    /// absent or already detached.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or user-provided hashing, equality,
+    /// ordering, cloning, or destruction code panics. A panic after mutation
+    /// starts poisons the map.
     pub fn detach<Q>(
         &mut self,
         key: &Q,
@@ -667,7 +859,20 @@ where
 
     /// Attaches a detached record using its retained order.
     ///
-    /// Returns `None` when the key is missing or already attached.
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to attach.
+    ///
+    /// # Returns
+    ///
+    /// Exclusive value access for the attached record, or `None` when `key` is
+    /// absent or already attached.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned, stable sequence allocation is exhausted,
+    /// or user-provided hashing, equality, ordering, cloning, or destruction
+    /// code panics. A panic after mutation starts poisons the map.
     pub fn attach<Q>(&mut self, key: &Q) -> Option<EntryMut<'_, K, O, V>>
     where
         K: Borrow<Q>,
@@ -700,8 +905,22 @@ where
 
     /// Replaces a record's retained order while preserving attachment state.
     ///
-    /// Attached records receive a fresh stable sequence. Returns the previous
-    /// order, or `None` when the primary key is absent.
+    /// Attached records receive a fresh stable sequence.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to reorder.
+    /// * `order` - New ordered secondary key retained by the record.
+    ///
+    /// # Returns
+    ///
+    /// The previous order, or `None` when `key` is absent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned, stable sequence allocation is exhausted,
+    /// or user-provided hashing, equality, ordering, cloning, or destruction
+    /// code panics. A panic after mutation starts poisons the map.
     pub fn set_order<Q>(&mut self, key: &Q, order: O) -> Option<O>
     where
         K: Borrow<Q>,
@@ -792,7 +1011,8 @@ where
     /// # Panics
     ///
     /// Panics if the map is poisoned, the start bound is greater than the end
-    /// bound, or equal start and end bounds are both excluded.
+    /// bound, equal start and end bounds are both excluded, or cloning a range
+    /// bound panics.
     pub fn extract_range<R>(&mut self, range: R) -> ExtractRange<'_, K, O, V, S>
     where
         R: RangeBounds<O>,
@@ -803,15 +1023,28 @@ where
             bounds: order_range_bounds(&range),
         }
     }
+}
 
+impl<K, O, V, S> OrderedIndexMap<K, O, V, S>
+where
+    K: Hash,
+    O: Ord,
+    S: BuildHasher,
+{
     /// Removes and returns the first attached record.
+    ///
+    /// # Returns
+    ///
+    /// The lowest ordered record, or `None` when no record is attached.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or hashing the primary key or destroying
+    /// the ordered-index key panics. A destructor panic after removal starts
+    /// poisons the map.
     pub fn pop_first(&mut self) -> Option<OwnedEntry<K, O, V>> {
         self.assert_healthy();
-        let (ordered_key, id) = self
-            .state
-            .ordered
-            .first_key_value()
-            .map(|(key, id)| (key.clone(), *id))?;
+        let id = *self.state.ordered.first_key_value().map(|(_, id)| id)?;
         let hash = {
             let record =
                 self.state.arena.get(id).expect(
@@ -819,7 +1052,24 @@ where
                 );
             self.hash_builder.hash_one(&record.key)
         };
-        Some(self.remove_slot(hash, id, Some(ordered_key)))
+        Some(self.with_mutation(|state, _| {
+            remove_primary_id(state, hash, id);
+            let (ordered_key, removed_id) = state
+                .ordered
+                .pop_first()
+                .expect("first ordered slot must remain present");
+            assert_eq!(
+                removed_id, id,
+                "first ordered slot must match the preflight slot",
+            );
+            drop(ordered_key);
+            owned_from_record(
+                state
+                    .arena
+                    .remove(id)
+                    .expect("removed primary slot must be occupied"),
+            )
+        }))
     }
 }
 

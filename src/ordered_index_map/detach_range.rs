@@ -57,7 +57,8 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if the owner map is poisoned.
+    /// Panics if the owner map is poisoned or ordering, cloning, or destroying
+    /// an ordered key panics. A panic after detachment starts poisons the map.
     pub fn next(&mut self) -> Option<DetachedEntryMut<'_, K, O, V>> {
         self.map.assert_healthy();
         let (ordered_key, id) = self.first_candidate()?;
@@ -74,7 +75,8 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if the owner map is poisoned.
+    /// Panics if the owner map is poisoned or ordering, cloning, or destroying
+    /// an ordered key panics. A panic after detachment starts poisons the map.
     pub fn next_back(&mut self) -> Option<DetachedEntryMut<'_, K, O, V>> {
         self.map.assert_healthy();
         let (ordered_key, id) = self.last_candidate()?;
@@ -90,7 +92,7 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if the owner map is poisoned.
+    /// Panics if the owner map is poisoned or comparing ordered keys panics.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.map.assert_healthy();

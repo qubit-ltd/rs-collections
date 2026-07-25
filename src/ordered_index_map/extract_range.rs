@@ -26,6 +26,12 @@ use super::{
 /// The iterator is double-ended. Records not yet yielded remain in the map if
 /// the iterator is dropped early.
 ///
+/// # Panics
+///
+/// Advancing the iterator panics if the owner map is poisoned or
+/// user-provided hashing, ordering, cloning, or destruction code panics. A
+/// panic after removal starts poisons the map.
+///
 /// # Type Parameters
 ///
 /// * `K` - Primary key type.
@@ -72,7 +78,7 @@ where
 
 impl<K, O, V, S> DoubleEndedIterator for ExtractRange<'_, K, O, V, S>
 where
-    K: Eq + Hash,
+    K: Hash,
     O: Ord + Clone,
     S: BuildHasher,
 {

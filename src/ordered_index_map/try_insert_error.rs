@@ -8,6 +8,9 @@
 // qubit-style: allow source-test-pair
 //! Rejected input returned by non-replacing insertion.
 
+use std::error::Error;
+use std::fmt;
+
 /// Owned input rejected because its primary key was already present.
 ///
 /// # Type Parameters
@@ -76,4 +79,18 @@ impl<K, O, V> TryInsertError<K, O, V> {
     pub fn into_parts(self) -> (K, O, V) {
         (self.key, self.order, self.value)
     }
+}
+
+impl<K, O, V> fmt::Display for TryInsertError<K, O, V> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("primary key is already present")
+    }
+}
+
+impl<K, O, V> Error for TryInsertError<K, O, V>
+where
+    K: fmt::Debug,
+    O: fmt::Debug,
+    V: fmt::Debug,
+{
 }
