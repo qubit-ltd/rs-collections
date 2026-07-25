@@ -128,6 +128,18 @@ fn ordered_model(model: &HashMap<u8, ModelEntry>) -> Vec<(u8, u8, i16)> {
         .collect()
 }
 
+/// Returns attached model records whose orders are in an inclusive range.
+fn ordered_model_range(
+    model: &HashMap<u8, ModelEntry>,
+    lower: u8,
+    upper: u8,
+) -> Vec<(u8, u8, i16)> {
+    ordered_model(model)
+        .into_iter()
+        .filter(|(_, order, _)| (lower..=upper).contains(order))
+        .collect()
+}
+
 /// Verifies every public read view against the model.
 fn assert_matches_model(
     map: &OrderedIndexMap<u8, u8, i16>,
@@ -179,6 +191,50 @@ fn test_ordered_index_map_construction_and_capacity() {
     map.reserve(32);
     assert!(map.capacity() >= 32);
     assert!(OrderedIndexMap::<u64, u64, u64>::default().is_empty());
+}
+
+#[test]
+fn test_ordered_index_map_try_insert_returns_mutable_inserted_entry() {
+    let mut map = OrderedIndexMap::new();
+    let mut key = 0;
+    map.insert(key, 5, String::from("existing"));
+    while map.len() < map.capacity() {
+        key += 1;
+        map.insert(key, 5, format!("existing-{key}"));
+    }
+    let previous_len = map.len();
+    key += 1;
+
+    let mut inserted = map
+        .try_insert(key, 10, String::from("first"))
+        .expect("vacant key should be inserted");
+    inserted.value_mut().push_str(" updated");
+    drop(inserted);
+
+    assert_eq!(Some("first updated"), map.get(&key).map(String::as_str));
+    assert_eq!(Some("existing"), map.get(&0).map(String::as_str));
+    assert_eq!(previous_len + 1, map.len());
+    assert_eq!(previous_len + 1, map.attached_len());
+}
+
+#[test]
+fn test_ordered_index_map_try_insert_rejects_duplicate_without_mutation() {
+    let mut map = OrderedIndexMap::new();
+    map.insert(1, 10, String::from("stored"));
+
+    let rejected = map
+        .try_insert(1, 20, String::from("rejected"))
+        .expect_err("occupied key should be rejected");
+
+    assert_eq!(
+        (&1, &20, "rejected"),
+        (rejected.key(), rejected.order(), rejected.value().as_str(),)
+    );
+    assert_eq!((1, 20, String::from("rejected")), rejected.into_parts(),);
+    assert_eq!(Some("stored"), map.get(&1).map(String::as_str));
+    assert_eq!(Some(10), map.get_entry(&1).map(|entry| *entry.order()));
+    assert_eq!(1, map.len());
+    assert_eq!(1, map.attached_len());
 }
 
 #[test]
@@ -406,6 +462,48 @@ fn test_ordered_index_map_all_range_bound_forms() {
 }
 
 #[test]
+fn test_ordered_index_map_range_panics_for_equal_excluded_bounds() {
+    let map = OrderedIndexMap::<u8, u8, u8>::new();
+
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            let _entries = map
+                .range((Bound::Excluded(2), Bound::Excluded(2)))
+                .collect::<Vec<_>>();
+        }))
+        .is_err(),
+    );
+}
+
+#[test]
+fn test_ordered_index_map_detach_range_panics_for_inverted_bounds() {
+    let mut map = OrderedIndexMap::<u8, u8, u8>::new();
+
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            let mut cursor =
+                map.detach_range((Bound::Included(3), Bound::Included(1)));
+            let _entry = cursor.next();
+        }))
+        .is_err(),
+    );
+}
+
+#[test]
+fn test_ordered_index_map_extract_range_panics_for_inverted_bounds() {
+    let mut map = OrderedIndexMap::<u8, u8, u8>::new();
+
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            let mut extracted =
+                map.extract_range((Bound::Included(3), Bound::Included(1)));
+            let _entry = extracted.next();
+        }))
+        .is_err(),
+    );
+}
+
+#[test]
 fn test_ordered_index_map_detach_range_is_lending_and_double_ended() {
     let mut map = OrderedIndexMap::new();
     for key in 0..5 {
@@ -610,7 +708,7 @@ fn test_ordered_index_map_poisoned_after_order_mutation_panic() {
 
 #[test]
 fn test_ordered_index_map_matches_bounded_mixed_operation_model() {
-    const OPERATION_COUNT: usize = 1_024;
+    const OPERATION_COUNT: usize = 4_096;
 
     let mut map = OrderedIndexMap::new();
     let mut model = HashMap::<u8, ModelEntry>::new();
@@ -619,10 +717,13 @@ fn test_ordered_index_map_matches_bounded_mixed_operation_model() {
 
     for _ in 0..OPERATION_COUNT {
         let generated = next_state(&mut state);
-        let operation = generated % 7;
+        let operation = generated % 13;
         let key = ((generated >> 8) % 8) as u8;
         let order = ((generated >> 16) % 4) as u8;
         let value = (generated >> 24) as i16;
+        let other_order = ((generated >> 40) % 4) as u8;
+        let lower = order.min(other_order);
+        let upper = order.max(other_order);
 
         match operation {
             0 => {
@@ -716,13 +817,111 @@ fn test_ordered_index_map_matches_bounded_mixed_operation_model() {
                     }),
                 );
             }
-            _ => {
+            6 => {
                 if let Some(entry) = model.get_mut(&key) {
                     entry.value = value;
                 }
                 if let Some(stored) = map.get_mut(&key) {
                     *stored = value;
                 }
+            }
+            7 => {
+                if let Some(entry) = model.get(&key) {
+                    let rejected = map
+                        .try_insert(key, order, value)
+                        .expect_err("occupied model key should be rejected");
+                    assert_eq!((key, order, value), rejected.into_parts());
+                    assert_eq!(
+                        entry.value,
+                        map.get(&key).copied().expect("stored value")
+                    );
+                } else {
+                    let inserted = map
+                        .try_insert(key, order, value)
+                        .expect("vacant model key should be inserted");
+                    assert_eq!(&value, inserted.value());
+                    model.insert(
+                        key,
+                        ModelEntry {
+                            order,
+                            value,
+                            sequence: Some(sequence),
+                        },
+                    );
+                    sequence += 1;
+                }
+            }
+            8 => {
+                assert_eq!(
+                    ordered_model_range(&model, lower, upper),
+                    map.range(lower..=upper)
+                        .map(|entry| (
+                            *entry.key(),
+                            *entry.order(),
+                            *entry.value()
+                        ))
+                        .collect::<Vec<_>>(),
+                );
+            }
+            9 => {
+                let candidates = ordered_model_range(&model, lower, upper);
+                let expected = if generated & 1 == 0 {
+                    candidates.first().copied()
+                } else {
+                    candidates.last().copied()
+                };
+                let actual = {
+                    let mut cursor = map.detach_range(lower..=upper);
+                    let entry = if generated & 1 == 0 {
+                        cursor.next()
+                    } else {
+                        cursor.next_back()
+                    };
+                    entry.map(|entry| {
+                        (*entry.key(), *entry.order(), *entry.value())
+                    })
+                };
+                assert_eq!(expected, actual);
+                if let Some((detached_key, _, _)) = expected {
+                    model
+                        .get_mut(&detached_key)
+                        .expect("detached model record should exist")
+                        .sequence = None;
+                }
+            }
+            10 => {
+                let candidates = ordered_model_range(&model, lower, upper);
+                let expected = if generated & 1 == 0 {
+                    candidates.first().copied()
+                } else {
+                    candidates.last().copied()
+                };
+                let actual = {
+                    let mut extracted = map.extract_range(lower..=upper);
+                    let entry = if generated & 1 == 0 {
+                        extracted.next()
+                    } else {
+                        extracted.next_back()
+                    };
+                    entry.map(|entry| {
+                        let (key, order, value, state) = entry.into_parts();
+                        assert_eq!(IndexState::Attached, state);
+                        (key, order, value)
+                    })
+                };
+                assert_eq!(expected, actual);
+                if let Some((extracted_key, _, _)) = expected {
+                    model.remove(&extracted_key);
+                }
+            }
+            11 => {
+                map.clear();
+                model.clear();
+                sequence = 0;
+            }
+            _ => {
+                map.reserve((generated as usize) & 3);
+                assert_matches_model(&map.clone(), &model);
             }
         }
         assert_matches_model(&map, &model);

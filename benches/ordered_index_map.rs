@@ -38,6 +38,24 @@ fn populated_map(entry_count: usize) -> OrderedIndexMap<usize, usize, usize> {
     map
 }
 
+/// Creates an indexed map whose records all share one order key.
+fn equal_order_map(entry_count: usize) -> OrderedIndexMap<usize, usize, usize> {
+    let mut map = OrderedIndexMap::new();
+    for key in 0..entry_count {
+        map.insert(key, 0, key);
+    }
+    map
+}
+
+/// Returns a deterministic permutation for primary-key removal.
+fn removal_keys(entry_count: usize) -> Vec<usize> {
+    const ODD_MULTIPLIER: usize = 0x9E37_79B1;
+
+    (0..entry_count)
+        .map(|index| index.wrapping_mul(ODD_MULTIPLIER) % entry_count)
+        .collect()
+}
+
 /// Benchmarks insertion into an initially empty map.
 ///
 /// # Parameters
@@ -111,9 +129,9 @@ fn benchmark_detach_range(criterion: &mut Criterion) {
             BenchmarkId::from_parameter(entry_count),
             &entry_count,
             |bencher, &entry_count| {
-                bencher.iter_batched(
+                bencher.iter_batched_ref(
                     || populated_map(entry_count),
-                    |mut map| {
+                    |map| {
                         let mut cursor =
                             map.detach_range(..=black_box(upper_bound));
                         while let Some(entry) = cursor.next() {
@@ -143,9 +161,9 @@ fn benchmark_extract_range(criterion: &mut Criterion) {
             BenchmarkId::from_parameter(entry_count),
             &entry_count,
             |bencher, &entry_count| {
-                bencher.iter_batched(
+                bencher.iter_batched_ref(
                     || populated_map(entry_count),
-                    |mut map| {
+                    |map| {
                         for entry in
                             map.extract_range(..=black_box(upper_bound))
                         {
@@ -154,6 +172,54 @@ fn benchmark_extract_range(criterion: &mut Criterion) {
                     },
                     BatchSize::SmallInput,
                 );
+            },
+        );
+    }
+    group.finish();
+}
+
+/// Benchmarks primary removal in a deterministic non-sequential order.
+fn benchmark_primary_removal(criterion: &mut Criterion) {
+    let mut group =
+        criterion.benchmark_group("ordered_index_map/primary_removal");
+    for entry_count in ENTRY_COUNTS {
+        group.throughput(Throughput::Elements(entry_count as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(entry_count),
+            &entry_count,
+            |bencher, &entry_count| {
+                bencher.iter_batched_ref(
+                    || (populated_map(entry_count), removal_keys(entry_count)),
+                    |(map, keys)| {
+                        for key in keys {
+                            let removed = map.remove(black_box(key));
+                            black_box(removed);
+                        }
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
+/// Benchmarks ordered traversal when every record has equal priority.
+fn benchmark_equal_order_iteration(criterion: &mut Criterion) {
+    let mut group =
+        criterion.benchmark_group("ordered_index_map/equal_order_iteration");
+    for entry_count in ENTRY_COUNTS {
+        let map = equal_order_map(entry_count);
+        group.throughput(Throughput::Elements(entry_count as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(entry_count),
+            &entry_count,
+            |bencher, &_entry_count| {
+                bencher.iter(|| {
+                    for entry in map.iter_ordered() {
+                        let _entry = black_box(entry);
+                    }
+                });
             },
         );
     }
@@ -192,6 +258,8 @@ criterion_group!(
     benchmark_primary_lookup,
     benchmark_detach_range,
     benchmark_extract_range,
+    benchmark_primary_removal,
+    benchmark_equal_order_iteration,
     benchmark_values_ordered,
 );
 criterion_main!(benches);

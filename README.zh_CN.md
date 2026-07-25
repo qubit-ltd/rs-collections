@@ -68,12 +68,17 @@ assert_eq!(
 每次插入都会挂载到有序索引。`pop_first`、`remove` 和 `extract_range`
 删除完整记录。`detach` 和 `detach_range` 保留主记录，并且无需再次进行
 哈希查询即可访问值；`attach` 恢复有序可见性。`set_order` 在保留挂载状态的
-同时修改有序键。
+同时修改有序键。`insert` 会替换已占用的主键；`try_insert` 则拒绝重复项，
+并原样返回未插入的主键、有序键和值。
 
 `get_entry`、`iter`、`iter_ordered`、`range` 和 `first` 会公开记录的
 主键、有序键、值与 `IndexState`。下游只需要值时可直接使用
 `values_ordered`。主键和有序键不能直接修改，因为不重建相应索引的修改会破坏
-集合不变量。
+集合不变量；通过内部可变性间接修改也受同一限制。
+
+当范围起点大于终点，或相等的两个端点都为排除边界时，范围操作会 panic。
+提前丢弃 `detach_range` 或 `extract_range` 只影响已经产出的记录。挂载顺序使用
+`u64` 序列；序列耗尽时会 panic，而 `clear` 会重置序列分配器。
 
 如果用户定义的键 trait 在跨索引修改过程中 panic，Map 会进入中毒状态并拒绝
 后续操作。此时应丢弃该实例，避免读取只完成了一半的索引更新。

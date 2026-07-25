@@ -13,32 +13,36 @@ use std::hash::{
     BuildHasher,
     Hash,
 };
-use std::ops::Bound;
 
 use crate::OwnedEntry;
 
 use super::{
     OrderedIndexMap,
-    sequence_bounds,
+    SequenceBounds,
 };
 
 /// An iterator that removes and yields records within an ordered range.
 ///
 /// The iterator is double-ended. Records not yet yielded remain in the map if
 /// the iterator is dropped early.
+///
+/// # Type Parameters
+///
+/// * `K` - Primary key type.
+/// * `O` - Ordered secondary key type.
+/// * `V` - Stored value type.
+/// * `S` - Hash builder used by the primary index.
 #[must_use = "the iterator removes records only while it is advanced"]
 pub struct ExtractRange<'a, K, O, V, S = RandomState> {
     /// Exclusively borrowed owner map.
     pub(super) map: &'a mut OrderedIndexMap<K, O, V, S>,
-    /// Owned lower range bound.
-    pub(super) start: Bound<O>,
-    /// Owned upper range bound.
-    pub(super) end: Bound<O>,
+    /// Expanded bounds over order and stable sequence.
+    pub(super) bounds: SequenceBounds<O>,
 }
 
 impl<K, O, V, S> Iterator for ExtractRange<'_, K, O, V, S>
 where
-    K: Eq + Hash,
+    K: Hash,
     O: Ord + Clone,
     S: BuildHasher,
 {
@@ -50,7 +54,7 @@ where
             .map
             .state
             .ordered
-            .range(sequence_bounds(&self.start, &self.end))
+            .range((self.bounds.0.as_ref(), self.bounds.1.as_ref()))
             .next()
             .map(|(key, id)| (key.clone(), *id))?;
         let hash = self.map.hash_builder.hash_one(
@@ -78,7 +82,7 @@ where
             .map
             .state
             .ordered
-            .range(sequence_bounds(&self.start, &self.end))
+            .range((self.bounds.0.as_ref(), self.bounds.1.as_ref()))
             .next_back()
             .map(|(key, id)| (key.clone(), *id))?;
         let hash = self.map.hash_builder.hash_one(

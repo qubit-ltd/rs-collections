@@ -36,8 +36,6 @@ pub(crate) struct InternalState<K, O, V> {
     pub(crate) ordered: BTreeMap<(O, Sequence), SlotId>,
     /// Next stable sequence assigned by insertion or attachment.
     pub(crate) next_sequence: u64,
-    /// Number of records participating in the ordered index.
-    pub(crate) attached_len: usize,
 }
 
 impl<K, O, V> InternalState<K, O, V> {
@@ -54,7 +52,6 @@ impl<K, O, V> InternalState<K, O, V> {
             primary: HashTable::new(),
             ordered: BTreeMap::new(),
             next_sequence: 0,
-            attached_len: 0,
         }
     }
 
@@ -75,7 +72,6 @@ impl<K, O, V> InternalState<K, O, V> {
             primary: HashTable::with_capacity(capacity),
             ordered: BTreeMap::new(),
             next_sequence: 0,
-            attached_len: 0,
         }
     }
 

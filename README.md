@@ -72,13 +72,20 @@ Every insertion starts attached. `pop_first`, `remove`, and `extract_range`
 delete complete records. `detach` and `detach_range` retain primary records and
 return value access without another hash lookup; `attach` restores ordered
 visibility. `set_order` changes the retained order while preserving the
-attachment state.
+attachment state. `insert` replaces an occupied primary key, while `try_insert`
+rejects duplicates and returns the untouched key, order, and value.
 
 `get_entry`, `iter`, `iter_ordered`, `range`, and `first` expose a record's key,
 order, value, and `IndexState`. `values_ordered` is the concise path for
 downstream code that only needs values. The primary key and order are not
 directly mutable because changing either without rebuilding its index would
-violate collection invariants.
+violate collection invariants. The same restriction applies to changes made
+through interior mutability.
+
+Invalid ranges panic when the start exceeds the end or equal endpoints are
+both excluded. Dropping `detach_range` or `extract_range` early affects only
+records already yielded. Attachment order uses a `u64` sequence; exhausting it
+panics, while `clear` resets the sequence allocator.
 
 If a user-defined key trait panics while a cross-index mutation is in progress,
 the map becomes poisoned and rejects later operations. Discard that instance

@@ -28,5 +28,6 @@ pub use ordered_index_map::{
     DetachRange,
     ExtractRange,
     OrderedIndexMap,
+    TryInsertError,
 };
 pub use owned_entry::OwnedEntry;

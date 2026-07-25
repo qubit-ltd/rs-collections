@@ -9,9 +9,11 @@
 
 mod detach_range;
 mod extract_range;
+mod try_insert_error;
 
 pub use detach_range::DetachRange;
 pub use extract_range::ExtractRange;
+pub use try_insert_error::TryInsertError;
 
 use std::borrow::Borrow;
 use std::collections::hash_map::RandomState;
@@ -48,10 +50,20 @@ type SequenceBounds<O> = (Bound<(O, Sequence)>, Bound<(O, Sequence)>);
 /// keys retain attachment order. A record may be detached from ordered
 /// operations while remaining addressable through its primary key.
 ///
+/// `insert` replaces an occupied primary key and returns the previous record.
+/// Use [`Self::try_insert`] when replacement would indicate a caller error.
+///
 /// This type performs no internal locking. It is [`Send`] and [`Sync`] exactly
 /// when its type parameters and hash builder are, which makes it suitable for
 /// external synchronization with types such as [`std::sync::Mutex`] or
 /// [`std::sync::RwLock`].
+///
+/// # Interior Mutability
+///
+/// Keys and orders must remain logically unchanged while stored, including
+/// changes made through interior-mutability types. Mutating either component
+/// without rebuilding its index is a logic error and may make lookups or
+/// ordered operations return incorrect results.
 ///
 /// # Panic and Unwind Safety
 ///
@@ -59,6 +71,24 @@ type SequenceBounds<O> = (Bound<(O, Sequence)>, Bound<(O, Sequence)>);
 /// [`Hash`], [`Eq`], [`Ord`], [`Clone`], or destructor implementation panics
 /// after mutation starts, all later operations panic instead of exposing
 /// potentially inconsistent indexes. The poisoned map should be discarded.
+/// Stable attachment sequences use `u64`; insertion, attachment, or attached
+/// reordering panics if that sequence space is exhausted. [`Self::clear`]
+/// resets the sequence allocator.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_collections::OrderedIndexMap;
+///
+/// let mut queue = OrderedIndexMap::new();
+/// queue.try_insert("job", 10, "ready")?;
+/// let rejected = queue
+///     .try_insert("job", 20, "duplicate")
+///     .expect_err("the primary key is already occupied");
+/// assert_eq!(("job", 20, "duplicate"), rejected.into_parts());
+/// assert_eq!(Some(&"ready"), queue.get("job"));
+/// # Ok::<(), qubit_collections::TryInsertError<&str, i32, &str>>(())
+/// ```
 ///
 /// # Type Parameters
 ///
@@ -165,7 +195,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     #[inline(always)]
     pub fn attached_len(&self) -> usize {
         self.assert_healthy();
-        self.state.attached_len
+        self.state.ordered.len()
     }
 
     /// Reports whether the ordered index contains no records.
@@ -173,7 +203,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     #[inline(always)]
     pub fn is_attached_empty(&self) -> bool {
         self.assert_healthy();
-        self.state.attached_len == 0
+        self.state.ordered.is_empty()
     }
 
     /// Returns the number of records accepted without growing primary storage.
@@ -199,7 +229,6 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
             state.ordered.clear();
             state.arena.clear();
             state.next_sequence = 0;
-            state.attached_len = 0;
         });
     }
 
@@ -251,6 +280,17 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     /// # Parameters
     ///
     /// * `range` - Inclusive or exclusive bounds over secondary keys.
+    ///
+    /// # Returns
+    ///
+    /// A double-ended iterator over attached records in stable ordered-index
+    /// order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned, the start bound is greater than the end
+    /// bound, equal start and end bounds are both excluded, or cloning a range
+    /// bound panics.
     #[inline]
     pub fn range<R>(
         &self,
@@ -492,7 +532,6 @@ where
                 if let Some(ordered_key) = previous_ordered_key {
                     let removed = state.ordered.remove(&ordered_key);
                     assert_eq!(removed, Some(id), "ordered index must reference replaced slot");
-                    state.attached_len -= 1;
                 }
                 owned_from_record(
                     state
@@ -520,9 +559,65 @@ where
             });
             let old = state.ordered.insert((indexed_order, sequence), id);
             assert!(old.is_none(), "ordered index sequence must be unique");
-            state.attached_len += 1;
             previous
         })
+    }
+
+    /// Inserts a record only when its primary key is vacant.
+    ///
+    /// Unlike [`Self::insert`], this method never replaces an existing record.
+    /// A rejected key leaves every map record and both indexes unchanged.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Unique primary key proposed for the record.
+    /// * `order` - Ordered secondary key proposed for the record.
+    /// * `value` - Value proposed for the record.
+    ///
+    /// # Returns
+    ///
+    /// An exclusive view of the inserted record, or a [`TryInsertError`]
+    /// containing the rejected key, order, and value when `key` is occupied.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned, if stable sequence allocation is
+    /// exhausted, or if user-provided hashing, equality, ordering, cloning, or
+    /// destruction code panics. A panic after mutation starts poisons the map.
+    pub fn try_insert(
+        &mut self,
+        key: K,
+        order: O,
+        value: V,
+    ) -> Result<EntryMut<'_, K, O, V>, TryInsertError<K, O, V>> {
+        self.assert_healthy();
+        if self.find_slot(&key).is_some() {
+            return Err(TryInsertError::new(key, order, value));
+        }
+        let hash = self.hash_builder.hash_one(&key);
+        let indexed_order = order.clone();
+        let id = self.with_mutation(move |state, hash_builder| {
+            let sequence = state.allocate_sequence();
+            let id = state.arena.insert(Record {
+                key,
+                order,
+                value,
+                sequence: Some(sequence),
+            });
+            let arena = &state.arena;
+            state.primary.insert_unique(hash, id, |candidate| {
+                hash_builder.hash_one(
+                    &arena
+                        .get(*candidate)
+                        .expect("primary index must reference an occupied arena slot")
+                        .key,
+                )
+            });
+            let previous = state.ordered.insert((indexed_order, sequence), id);
+            assert!(previous.is_none(), "ordered index sequence must be unique");
+            id
+        });
+        Ok(self.entry_mut(id))
     }
 
     /// Removes and returns a record in either attachment state.
@@ -599,7 +694,6 @@ where
                 .get_mut(id)
                 .expect("attached primary slot must be occupied")
                 .sequence = Some(sequence);
-            state.attached_len += 1;
         });
         Some(self.entry_mut(id))
     }
@@ -657,6 +751,21 @@ where
     ///
     /// Each `next` or `next_back` call returns exclusive access to the value
     /// just detached. The cursor keeps the map exclusively borrowed.
+    /// Dropping the cursor early leaves unvisited records attached.
+    ///
+    /// # Parameters
+    ///
+    /// * `range` - Inclusive or exclusive bounds over secondary keys.
+    ///
+    /// # Returns
+    ///
+    /// A lending, double-ended cursor over matching attached records.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned, the start bound is greater than the end
+    /// bound, equal start and end bounds are both excluded, or cloning a range
+    /// bound panics.
     pub fn detach_range<R>(&mut self, range: R) -> DetachRange<'_, K, O, V, S>
     where
         R: RangeBounds<O>,
@@ -664,14 +773,26 @@ where
         self.assert_healthy();
         DetachRange {
             map: self,
-            start: clone_bound(range.start_bound()),
-            end: clone_bound(range.end_bound()),
+            bounds: order_range_bounds(&range),
         }
     }
 
     /// Returns an iterator that removes attached records in `range`.
     ///
     /// Dropping the iterator early leaves records not yet yielded in the map.
+    ///
+    /// # Parameters
+    ///
+    /// * `range` - Inclusive or exclusive bounds over secondary keys.
+    ///
+    /// # Returns
+    ///
+    /// A double-ended iterator that owns each removed record.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned, the start bound is greater than the end
+    /// bound, or equal start and end bounds are both excluded.
     pub fn extract_range<R>(&mut self, range: R) -> ExtractRange<'_, K, O, V, S>
     where
         R: RangeBounds<O>,
@@ -679,8 +800,7 @@ where
         self.assert_healthy();
         ExtractRange {
             map: self,
-            start: clone_bound(range.start_bound()),
-            end: clone_bound(range.end_bound()),
+            bounds: order_range_bounds(&range),
         }
     }
 
@@ -701,7 +821,12 @@ where
         };
         Some(self.remove_slot(hash, id, Some(ordered_key)))
     }
+}
 
+impl<K, O, V, S> OrderedIndexMap<K, O, V, S>
+where
+    O: Ord,
+{
     /// Detaches one slot with a prevalidated ordered-index key.
     fn detach_slot(&mut self, id: SlotId, ordered_key: (O, Sequence)) {
         self.with_mutation(|state, _| {
@@ -716,7 +841,6 @@ where
                 .get_mut(id)
                 .expect("detached primary slot must be occupied")
                 .sequence = None;
-            state.attached_len -= 1;
         });
     }
 
@@ -736,7 +860,6 @@ where
                     Some(id),
                     "ordered index must reference removed slot"
                 );
-                state.attached_len -= 1;
             }
             owned_from_record(
                 state
@@ -818,21 +941,13 @@ fn owned_from_record<K, O, V>(record: Record<K, O, V>) -> OwnedEntry<K, O, V> {
     }
 }
 
-/// Clones one borrowed range bound.
-fn clone_bound<T: Clone>(bound: Bound<&T>) -> Bound<T> {
-    match bound {
-        Bound::Included(value) => Bound::Included(value.clone()),
-        Bound::Excluded(value) => Bound::Excluded(value.clone()),
-        Bound::Unbounded => Bound::Unbounded,
-    }
-}
-
 /// Expands order bounds to cover all stable sequences for matching orders.
 fn order_range_bounds<O, R>(range: &R) -> SequenceBounds<O>
 where
-    O: Clone,
+    O: Clone + Ord,
     R: RangeBounds<O>,
 {
+    assert_valid_order_range(range);
     (
         match range.start_bound() {
             Bound::Included(order) => {
@@ -855,29 +970,32 @@ where
     )
 }
 
-/// Expands owned order bounds to cover all stable sequences.
-fn sequence_bounds<O: Clone>(
-    start: &Bound<O>,
-    end: &Bound<O>,
-) -> SequenceBounds<O> {
-    (
-        match start {
-            Bound::Included(order) => {
-                Bound::Included((order.clone(), Sequence(0)))
-            }
-            Bound::Excluded(order) => {
-                Bound::Excluded((order.clone(), Sequence(u64::MAX)))
-            }
-            Bound::Unbounded => Bound::Unbounded,
-        },
-        match end {
-            Bound::Included(order) => {
-                Bound::Included((order.clone(), Sequence(u64::MAX)))
-            }
-            Bound::Excluded(order) => {
-                Bound::Excluded((order.clone(), Sequence(0)))
-            }
-            Bound::Unbounded => Bound::Unbounded,
-        },
-    )
+/// Requires an order range to satisfy the standard ordered-map contract.
+///
+/// # Panics
+///
+/// Panics if the start bound is greater than the end bound, or equal start and
+/// end bounds are both excluded.
+fn assert_valid_order_range<O, R>(range: &R)
+where
+    O: Ord,
+    R: RangeBounds<O>,
+{
+    let (start, start_excluded) = match range.start_bound() {
+        Bound::Included(order) => (Some(order), false),
+        Bound::Excluded(order) => (Some(order), true),
+        Bound::Unbounded => (None, false),
+    };
+    let (end, end_excluded) = match range.end_bound() {
+        Bound::Included(order) => (Some(order), false),
+        Bound::Excluded(order) => (Some(order), true),
+        Bound::Unbounded => (None, false),
+    };
+    if let (Some(start), Some(end)) = (start, end) {
+        assert!(start <= end, "range start is greater than range end",);
+        assert!(
+            start != end || !(start_excluded && end_excluded),
+            "range start and end are equal and excluded",
+        );
+    }
 }
