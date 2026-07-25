@@ -47,6 +47,17 @@ fn equal_order_map(entry_count: usize) -> OrderedIndexMap<usize, usize, usize> {
     map
 }
 
+/// Creates a scheduler-like map split between one due and one future deadline.
+fn deadline_map(entry_count: usize) -> OrderedIndexMap<usize, usize, usize> {
+    let mut map = OrderedIndexMap::new();
+    let due_count = entry_count / 2;
+    for key in 0..entry_count {
+        let deadline = usize::from(key >= due_count);
+        map.insert(key, deadline, key);
+    }
+    map
+}
+
 /// Returns a deterministic permutation for primary-key removal.
 fn removal_keys(entry_count: usize) -> Vec<usize> {
     const ODD_MULTIPLIER: usize = 0x9E37_79B1;
@@ -89,6 +100,75 @@ fn benchmark_insertion(criterion: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmarks insertion when every record shares one priority.
+///
+/// # Parameters
+///
+/// * `criterion` - Criterion benchmark registry.
+fn benchmark_equal_order_insertion(criterion: &mut Criterion) {
+    let mut group =
+        criterion.benchmark_group("ordered_index_map/equal_order_insertion");
+    for entry_count in ENTRY_COUNTS {
+        group.throughput(Throughput::Elements(entry_count as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(entry_count),
+            &entry_count,
+            |bencher, &entry_count| {
+                bencher.iter_batched(
+                    OrderedIndexMap::new,
+                    |mut map| {
+                        for key in 0..entry_count {
+                            map.insert(
+                                black_box(key),
+                                black_box(0),
+                                black_box(key),
+                            );
+                        }
+                        black_box(map)
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
+/// Benchmarks insertion using deterministic non-sequential order keys.
+///
+/// # Parameters
+///
+/// * `criterion` - Criterion benchmark registry.
+fn benchmark_shuffled_order_insertion(criterion: &mut Criterion) {
+    let mut group =
+        criterion.benchmark_group("ordered_index_map/shuffled_order_insertion");
+    for entry_count in ENTRY_COUNTS {
+        let orders = removal_keys(entry_count);
+        group.throughput(Throughput::Elements(entry_count as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(entry_count),
+            &entry_count,
+            |bencher, &_entry_count| {
+                bencher.iter_batched(
+                    OrderedIndexMap::new,
+                    |mut map| {
+                        for (key, order) in orders.iter().copied().enumerate() {
+                            map.insert(
+                                black_box(key),
+                                black_box(order),
+                                black_box(key),
+                            );
+                        }
+                        black_box(map)
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
 /// Benchmarks repeated primary-key lookup in a populated map.
 ///
 /// # Parameters
@@ -109,6 +189,26 @@ fn benchmark_primary_lookup(criterion: &mut Criterion) {
                         let _value = black_box(map.get(black_box(&key)));
                     }
                 });
+            },
+        );
+    }
+    group.finish();
+}
+
+/// Benchmarks reading the first attached record.
+///
+/// # Parameters
+///
+/// * `criterion` - Criterion benchmark registry.
+fn benchmark_first(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("ordered_index_map/first");
+    for entry_count in ENTRY_COUNTS {
+        let map = populated_map(entry_count);
+        group.bench_with_input(
+            BenchmarkId::from_parameter(entry_count),
+            &entry_count,
+            |bencher, &_entry_count| {
+                bencher.iter(|| black_box(map.first()));
             },
         );
     }
@@ -178,6 +278,36 @@ fn benchmark_extract_range(criterion: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmarks extracting one scheduler batch sharing the same due deadline.
+///
+/// # Parameters
+///
+/// * `criterion` - Criterion benchmark registry.
+fn benchmark_due_batch_extraction(criterion: &mut Criterion) {
+    let mut group =
+        criterion.benchmark_group("ordered_index_map/due_batch_extraction");
+    for entry_count in ENTRY_COUNTS {
+        let due_count = entry_count / 2;
+        group.throughput(Throughput::Elements(due_count as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(entry_count),
+            &entry_count,
+            |bencher, &entry_count| {
+                bencher.iter_batched_ref(
+                    || deadline_map(entry_count),
+                    |map| {
+                        for entry in map.extract_range(..=black_box(0)) {
+                            let _entry = black_box(entry);
+                        }
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
 /// Benchmarks primary removal in a deterministic non-sequential order.
 fn benchmark_primary_removal(criterion: &mut Criterion) {
     let mut group =
@@ -194,6 +324,35 @@ fn benchmark_primary_removal(criterion: &mut Criterion) {
                         for key in keys {
                             let removed = map.remove(black_box(key));
                             black_box(removed);
+                        }
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
+/// Benchmarks draining every attached record from the ordered front.
+///
+/// # Parameters
+///
+/// * `criterion` - Criterion benchmark registry.
+fn benchmark_pop_first_drain(criterion: &mut Criterion) {
+    let mut group =
+        criterion.benchmark_group("ordered_index_map/pop_first_drain");
+    for entry_count in ENTRY_COUNTS {
+        group.throughput(Throughput::Elements(entry_count as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(entry_count),
+            &entry_count,
+            |bencher, &entry_count| {
+                bencher.iter_batched_ref(
+                    || populated_map(entry_count),
+                    |map| {
+                        while let Some(entry) = map.pop_first() {
+                            let _entry = black_box(entry);
                         }
                     },
                     BatchSize::SmallInput,
@@ -255,10 +414,15 @@ fn benchmark_values_ordered(criterion: &mut Criterion) {
 criterion_group!(
     benches,
     benchmark_insertion,
+    benchmark_equal_order_insertion,
+    benchmark_shuffled_order_insertion,
     benchmark_primary_lookup,
+    benchmark_first,
     benchmark_detach_range,
     benchmark_extract_range,
+    benchmark_due_batch_extraction,
     benchmark_primary_removal,
+    benchmark_pop_first_drain,
     benchmark_equal_order_iteration,
     benchmark_values_ordered,
 );
