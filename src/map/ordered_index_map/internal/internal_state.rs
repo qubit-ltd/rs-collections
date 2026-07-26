@@ -12,12 +12,7 @@ use std::collections::BTreeMap;
 
 use hashbrown::HashTable;
 
-use super::{
-    EntryArena,
-    Record,
-    Sequence,
-    SlotId,
-};
+use super::{EntryArena, Record, Sequence, SlotId};
 
 /// Owns the arena and both indexes for an ordered index map.
 ///

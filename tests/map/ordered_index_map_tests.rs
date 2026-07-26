@@ -8,28 +8,14 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::hash::{
-    BuildHasherDefault,
-    Hash,
-    Hasher,
-};
+use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::ops::Bound;
-use std::panic::{
-    AssertUnwindSafe,
-    catch_unwind,
-};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
-use std::sync::atomic::{
-    AtomicBool,
-    Ordering as AtomicOrdering,
-};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 
 use qubit_collections::map::OrderedIndexMap;
-use qubit_collections::map::ordered_index_map::{
-    ExtractRange,
-    IndexState,
-    TryInsertError,
-};
+use qubit_collections::map::ordered_index_map::{ExtractRange, IndexState, TryInsertError};
 
 /// Primary key that intentionally does not implement [`Clone`].
 #[derive(Debug, Eq, Hash, PartialEq)]
@@ -70,8 +56,7 @@ struct PanicEq {
 impl PartialEq for PanicEq {
     fn eq(&self, other: &Self) -> bool {
         assert!(
-            !self.panic.load(AtomicOrdering::SeqCst)
-                && !other.panic.load(AtomicOrdering::SeqCst),
+            !self.panic.load(AtomicOrdering::SeqCst) && !other.panic.load(AtomicOrdering::SeqCst),
             "intentional equality panic",
         );
         self.value == other.value
@@ -258,10 +243,7 @@ fn ordered_model_range(
 }
 
 /// Verifies every public read view against the model.
-fn assert_matches_model(
-    map: &OrderedIndexMap<u8, u8, i16>,
-    model: &HashMap<u8, ModelEntry>,
-) {
+fn assert_matches_model(map: &OrderedIndexMap<u8, u8, i16>, model: &HashMap<u8, ModelEntry>) {
     assert_eq!(model.len(), map.len());
     assert_eq!(
         model
@@ -370,15 +352,12 @@ fn test_try_insert_error_implements_standard_error_traits() {
 
 #[test]
 fn test_extract_range_double_ended_iterator_does_not_require_key_equality() {
-    assert_double_ended_iterator::<
-        ExtractRange<'static, HashOnlyKey, u64, &'static str>,
-    >();
+    assert_double_ended_iterator::<ExtractRange<'static, HashOnlyKey, u64, &'static str>>();
 }
 
 #[test]
 fn test_pop_first_does_not_require_key_equality_or_order_cloning() {
-    let mut map =
-        OrderedIndexMap::<HashOnlyKey, NonCloneOrder, &'static str>::new();
+    let mut map = OrderedIndexMap::<HashOnlyKey, NonCloneOrder, &'static str>::new();
 
     assert!(map.pop_first().is_none());
 }
@@ -697,8 +676,7 @@ fn test_ordered_index_map_detach_range_panics_for_inverted_bounds() {
 
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
-            let mut cursor =
-                map.detach_range((Bound::Included(3), Bound::Included(1)));
+            let mut cursor = map.detach_range((Bound::Included(3), Bound::Included(1)));
             let _entry = cursor.next();
         }))
         .is_err(),
@@ -711,8 +689,7 @@ fn test_ordered_index_map_extract_range_panics_for_inverted_bounds() {
 
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
-            let mut extracted =
-                map.extract_range((Bound::Included(3), Bound::Included(1)));
+            let mut extracted = map.extract_range((Bound::Included(3), Bound::Included(1)));
             let _entry = extracted.next();
         }))
         .is_err(),
@@ -1092,10 +1069,7 @@ fn test_ordered_index_map_matches_bounded_mixed_operation_model() {
                         },
                     )
                 });
-                assert_eq!(
-                    expected,
-                    map.remove(&key).map(|entry| entry.into_parts()),
-                );
+                assert_eq!(expected, map.remove(&key).map(|entry| entry.into_parts()),);
             }
             5 => {
                 let expected = ordered_model(&model).first().copied();
@@ -1125,10 +1099,7 @@ fn test_ordered_index_map_matches_bounded_mixed_operation_model() {
                         .try_insert(key, order, value)
                         .expect_err("occupied model key should be rejected");
                     assert_eq!((key, order, value), rejected.into_parts());
-                    assert_eq!(
-                        entry.value,
-                        map.get(&key).copied().expect("stored value")
-                    );
+                    assert_eq!(entry.value, map.get(&key).copied().expect("stored value"));
                 } else {
                     let inserted = map
                         .try_insert(key, order, value)
@@ -1149,11 +1120,7 @@ fn test_ordered_index_map_matches_bounded_mixed_operation_model() {
                 assert_eq!(
                     ordered_model_range(&model, lower, upper),
                     map.range(lower..=upper)
-                        .map(|entry| (
-                            *entry.key(),
-                            *entry.order(),
-                            *entry.value()
-                        ))
+                        .map(|entry| (*entry.key(), *entry.order(), *entry.value()))
                         .collect::<Vec<_>>(),
                 );
             }
@@ -1171,9 +1138,7 @@ fn test_ordered_index_map_matches_bounded_mixed_operation_model() {
                     } else {
                         cursor.next_back()
                     };
-                    entry.map(|entry| {
-                        (*entry.key(), *entry.order(), *entry.value())
-                    })
+                    entry.map(|entry| (*entry.key(), *entry.order(), *entry.value()))
                 };
                 assert_eq!(expected, actual);
                 if let Some((detached_key, _, _)) = expected {

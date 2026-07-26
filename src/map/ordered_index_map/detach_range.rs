@@ -10,16 +10,9 @@
 
 use std::collections::hash_map::RandomState;
 
-use super::internal::{
-    Sequence,
-    SlotId,
-};
+use super::internal::{Sequence, SlotId};
 
-use super::{
-    DetachedEntryMut,
-    OrderedIndexMap,
-    SequenceBounds,
-};
+use super::{DetachedEntryMut, OrderedIndexMap, SequenceBounds};
 
 /// A lending cursor that detaches records within an ordered range.
 ///
