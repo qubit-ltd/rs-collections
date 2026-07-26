@@ -9,9 +9,16 @@
 //! Owning iterator for extracting an ordered range.
 
 use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hash};
+use std::hash::{
+    BuildHasher,
+    Hash,
+};
 
-use super::{OrderedIndexMap, OwnedEntry, SequenceBounds};
+use super::{
+    OrderedIndexMap,
+    OwnedEntry,
+    SequenceBounds,
+};
 
 /// An iterator that removes and yields records within an ordered range.
 ///

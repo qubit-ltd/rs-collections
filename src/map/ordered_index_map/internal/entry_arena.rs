@@ -110,7 +110,10 @@ impl<T> EntryArena<T> {
     #[must_use]
     pub(crate) fn insert(&mut self, value: T) -> SlotId {
         let slot = if let Some(slot) = self.free_slots.pop() {
-            assert!(self.slots[slot].is_none(), "free arena slot must be vacant");
+            assert!(
+                self.slots[slot].is_none(),
+                "free arena slot must be vacant"
+            );
             self.slots[slot] = Some(value);
             slot
         } else {
