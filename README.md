@@ -26,6 +26,12 @@ map. The crate provides no internal synchronization. A map is `Send` and
 `Sync` when its components are; wrap shared mutable access in the
 synchronization primitive appropriate for its owner.
 
+## Available collections
+
+| Category | Type | Import path |
+| --- | --- | --- |
+| Map | `OrderedIndexMap` | `qubit_collections::map::OrderedIndexMap` |
+
 ## Complexity
 
 | Operation | Complexity |
@@ -46,7 +52,7 @@ qubit-collections = "0.1"
 ## Quick start
 
 ```rust
-use qubit_collections::OrderedIndexMap;
+use qubit_collections::map::OrderedIndexMap;
 
 let mut deadlines = OrderedIndexMap::new();
 deadlines.insert("later", 20, "second");

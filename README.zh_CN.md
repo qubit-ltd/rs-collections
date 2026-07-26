@@ -23,6 +23,12 @@ Map 之外维护一个可独立管理的有序次级索引。它支持按 `K` �
 实现 `Send` 和 `Sync`。需要共享可变访问时，应由所有者使用符合其并发模型的
 同步原语包装。
 
+## 可用集合
+
+| 分类 | 类型 | 导入路径 |
+| --- | --- | --- |
+| Map | `OrderedIndexMap` | `qubit_collections::map::OrderedIndexMap` |
+
 ## 复杂度
 
 | 操作 | 复杂度 |
@@ -43,7 +49,7 @@ qubit-collections = "0.1"
 ## 快速开始
 
 ```rust
-use qubit_collections::OrderedIndexMap;
+use qubit_collections::map::OrderedIndexMap;
 
 let mut deadlines = OrderedIndexMap::new();
 deadlines.insert("later", 20, "second");
