@@ -100,6 +100,80 @@ fn benchmark_insertion(criterion: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmarks inserting unique primary keys through `try_insert`.
+///
+/// # Parameters
+///
+/// * `criterion` - Criterion benchmark registry.
+fn benchmark_try_insert_vacant(criterion: &mut Criterion) {
+    let mut group =
+        criterion.benchmark_group("ordered_index_map/try_insert_vacant");
+    for entry_count in ENTRY_COUNTS {
+        group.throughput(Throughput::Elements(entry_count as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(entry_count),
+            &entry_count,
+            |bencher, &entry_count| {
+                bencher.iter_batched(
+                    OrderedIndexMap::new,
+                    |mut map| {
+                        for key in 0..entry_count {
+                            let _ = black_box(
+                                map.try_insert(
+                                    black_box(key),
+                                    black_box(key),
+                                    black_box(key),
+                                )
+                                .expect("generated key must be vacant"),
+                            );
+                        }
+                        black_box(map)
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
+/// Benchmarks rejecting occupied primary keys through `try_insert`.
+///
+/// # Parameters
+///
+/// * `criterion` - Criterion benchmark registry.
+fn benchmark_try_insert_occupied(criterion: &mut Criterion) {
+    let mut group =
+        criterion.benchmark_group("ordered_index_map/try_insert_occupied");
+    for entry_count in ENTRY_COUNTS {
+        group.throughput(Throughput::Elements(entry_count as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(entry_count),
+            &entry_count,
+            |bencher, &entry_count| {
+                bencher.iter_batched(
+                    || populated_map(entry_count),
+                    |mut map| {
+                        for key in 0..entry_count {
+                            let _ = black_box(
+                                map.try_insert(
+                                    black_box(key),
+                                    black_box(key),
+                                    black_box(key),
+                                )
+                                .expect_err("generated key must be occupied"),
+                            );
+                        }
+                        black_box(map)
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
 /// Benchmarks insertion when every record shares one priority.
 ///
 /// # Parameters
@@ -414,6 +488,8 @@ fn benchmark_values_ordered(criterion: &mut Criterion) {
 criterion_group!(
     benches,
     benchmark_insertion,
+    benchmark_try_insert_vacant,
+    benchmark_try_insert_occupied,
     benchmark_equal_order_insertion,
     benchmark_shuffled_order_insertion,
     benchmark_primary_lookup,
