@@ -629,6 +629,55 @@ fn test_ordered_index_map_all_range_bound_forms() {
 }
 
 #[test]
+fn test_ordered_index_map_range_bounds_keep_or_exclude_every_equal_order() {
+    let mut map = OrderedIndexMap::new();
+    map.insert(10, 1, "one");
+    map.insert(20, 2, "two-first");
+    map.insert(21, 2, "two-second");
+    map.insert(22, 2, "two-third");
+    map.insert(30, 3, "three");
+
+    assert_eq!(
+        vec![20, 21, 22],
+        map.range((Bound::Included(2), Bound::Included(2)))
+            .map(|entry| *entry.key())
+            .collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        vec![10],
+        map.range((Bound::Unbounded, Bound::Excluded(2)))
+            .map(|entry| *entry.key())
+            .collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        vec![30],
+        map.range((Bound::Excluded(2), Bound::Unbounded))
+            .map(|entry| *entry.key())
+            .collect::<Vec<_>>(),
+    );
+
+    let mut cursor = map.detach_range((Bound::Unbounded, Bound::Excluded(2)));
+    let mut detached = Vec::new();
+    while let Some(entry) = cursor.next() {
+        detached.push(*entry.key());
+    }
+    drop(cursor);
+    assert_eq!(vec![10], detached);
+
+    let extracted = map
+        .extract_range((Bound::Excluded(2), Bound::Unbounded))
+        .map(|entry| entry.into_key())
+        .collect::<Vec<_>>();
+    assert_eq!(vec![30], extracted);
+    assert_eq!(
+        vec![20, 21, 22],
+        map.iter_ordered()
+            .map(|entry| *entry.key())
+            .collect::<Vec<_>>(),
+    );
+}
+
+#[test]
 fn test_ordered_index_map_range_panics_for_equal_excluded_bounds() {
     let map = OrderedIndexMap::<u8, u8, u8>::new();
 

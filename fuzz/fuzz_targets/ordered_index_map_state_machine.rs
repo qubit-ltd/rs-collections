@@ -15,6 +15,7 @@
 #![no_main]
 
 use std::collections::HashMap;
+use std::ops::Bound;
 
 use libfuzzer_sys::fuzz_target;
 use qubit_collections::{
@@ -55,15 +56,45 @@ fn ordered_model(model: &HashMap<u8, ModelEntry>) -> Vec<(u8, u8, i16)> {
         .collect()
 }
 
-/// Returns attached model records in an inclusive order range.
+/// Returns whether one order key lies within `bounds`.
+fn order_in_bounds(order: u8, bounds: &(Bound<u8>, Bound<u8>)) -> bool {
+    let starts_after_lower = match bounds.0 {
+        Bound::Included(lower) => order >= lower,
+        Bound::Excluded(lower) => order > lower,
+        Bound::Unbounded => true,
+    };
+    let ends_before_upper = match bounds.1 {
+        Bound::Included(upper) => order <= upper,
+        Bound::Excluded(upper) => order < upper,
+        Bound::Unbounded => true,
+    };
+    starts_after_lower && ends_before_upper
+}
+
+/// Builds a valid order range from the bounded fuzz input.
+fn order_bounds(selector: u8, lower: u8, upper: u8) -> (Bound<u8>, Bound<u8>) {
+    match selector % 9 {
+        0 => (Bound::Unbounded, Bound::Unbounded),
+        1 => (Bound::Unbounded, Bound::Included(upper)),
+        2 => (Bound::Unbounded, Bound::Excluded(upper)),
+        3 => (Bound::Included(lower), Bound::Unbounded),
+        4 => (Bound::Excluded(lower), Bound::Unbounded),
+        5 => (Bound::Included(lower), Bound::Included(upper)),
+        6 => (Bound::Included(lower), Bound::Excluded(upper)),
+        7 => (Bound::Excluded(lower), Bound::Included(upper)),
+        _ if lower < upper => (Bound::Excluded(lower), Bound::Excluded(upper)),
+        _ => (Bound::Included(lower), Bound::Included(upper)),
+    }
+}
+
+/// Returns attached model records whose orders lie within `bounds`.
 fn ordered_model_range(
     model: &HashMap<u8, ModelEntry>,
-    lower: u8,
-    upper: u8,
+    bounds: &(Bound<u8>, Bound<u8>),
 ) -> Vec<(u8, u8, i16)> {
     ordered_model(model)
         .into_iter()
-        .filter(|(_, order, _)| (lower..=upper).contains(order))
+        .filter(|(_, order, _)| order_in_bounds(*order, bounds))
         .collect()
 }
 
@@ -124,6 +155,7 @@ fuzz_target!(|data: &[u8]| {
         let value = i16::from_le_bytes([operation[3], operation[4]]);
         let lower = order.min(other_order);
         let upper = order.max(other_order);
+        let bounds = order_bounds(operation[4], lower, upper);
 
         match selector {
             0 => {
@@ -251,8 +283,8 @@ fuzz_target!(|data: &[u8]| {
             }
             8 => {
                 assert_eq!(
-                    ordered_model_range(&model, lower, upper),
-                    map.range(lower..=upper)
+                    ordered_model_range(&model, &bounds),
+                    map.range(bounds.clone())
                         .map(|entry| (
                             *entry.key(),
                             *entry.order(),
@@ -263,9 +295,9 @@ fuzz_target!(|data: &[u8]| {
             }
             9 => {
                 let expected =
-                    ordered_model_range(&model, lower, upper).first().copied();
+                    ordered_model_range(&model, &bounds).first().copied();
                 let actual =
-                    map.detach_range(lower..=upper).next().map(|entry| {
+                    map.detach_range(bounds.clone()).next().map(|entry| {
                         (*entry.key(), *entry.order(), *entry.value())
                     });
                 assert_eq!(expected, actual);
@@ -278,9 +310,9 @@ fuzz_target!(|data: &[u8]| {
             }
             10 => {
                 let expected =
-                    ordered_model_range(&model, lower, upper).last().copied();
+                    ordered_model_range(&model, &bounds).last().copied();
                 let actual =
-                    map.extract_range(lower..=upper).next_back().map(|entry| {
+                    map.extract_range(bounds).next_back().map(|entry| {
                         let (key, order, value, state) = entry.into_parts();
                         assert_eq!(IndexState::Attached, state);
                         (key, order, value)
