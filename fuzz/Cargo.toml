@@ -9,7 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-qubit-collections = { path = ".." }
+qubit-collections = { version = "0.1" }
 
 [[bin]]
 name = "ordered_index_map_state_machine"
