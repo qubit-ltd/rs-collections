@@ -10,13 +10,13 @@
 
 use std::collections::hash_map::RandomState;
 
-use crate::DetachedEntryMut;
-use crate::internal::{
+use super::internal::{
     Sequence,
     SlotId,
 };
 
 use super::{
+    DetachedEntryMut,
     OrderedIndexMap,
     SequenceBounds,
 };

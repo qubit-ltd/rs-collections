@@ -8,7 +8,7 @@
 // qubit-style: allow source-test-pair
 //! Shared view of one primary record.
 
-use crate::IndexState;
+use super::IndexState;
 
 /// Shared key, order, value, and attachment state for one record.
 ///

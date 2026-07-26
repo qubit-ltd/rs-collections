@@ -5,7 +5,8 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Private implementation types for collection indexes.
+// qubit-style: allow source-test-pair
+//! Private implementation types for [`super::OrderedIndexMap`].
 
 mod entry_arena;
 mod internal_state;

@@ -15,7 +15,7 @@ use criterion::{
     criterion_group,
     criterion_main,
 };
-use qubit_collections::OrderedIndexMap;
+use qubit_collections::map::OrderedIndexMap;
 use std::hint::black_box;
 
 /// Representative populations from small registries to larger schedulers.

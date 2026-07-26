@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 use hashbrown::HashTable;
 
-use crate::internal::{
+use super::{
     EntryArena,
     Record,
     Sequence,

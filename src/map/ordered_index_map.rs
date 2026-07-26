@@ -8,11 +8,22 @@
 //! A primary-key map with an independently managed ordered secondary index.
 
 mod detach_range;
+mod detached_entry_mut;
+mod entry_mut;
+mod entry_ref;
 mod extract_range;
+mod index_state;
+mod internal;
+mod owned_entry;
 mod try_insert_error;
 
 pub use detach_range::DetachRange;
+pub use detached_entry_mut::DetachedEntryMut;
+pub use entry_mut::EntryMut;
+pub use entry_ref::EntryRef;
 pub use extract_range::ExtractRange;
+pub use index_state::IndexState;
+pub use owned_entry::OwnedEntry;
 pub use try_insert_error::TryInsertError;
 
 use std::borrow::Borrow;
@@ -27,17 +38,11 @@ use std::ops::{
     RangeBounds,
 };
 
-use crate::internal::{
+use self::internal::{
     InternalState,
     Record,
     Sequence,
     SlotId,
-};
-use crate::{
-    DetachedEntryMut,
-    EntryMut,
-    EntryRef,
-    OwnedEntry,
 };
 
 /// Expanded bounds over an order key and its stable sequence.
@@ -78,7 +83,7 @@ type SequenceBounds<O> = (Bound<(O, Sequence)>, Bound<(O, Sequence)>);
 /// # Examples
 ///
 /// ```
-/// use qubit_collections::OrderedIndexMap;
+/// use qubit_collections::map::OrderedIndexMap;
 ///
 /// let mut queue = OrderedIndexMap::new();
 /// queue.try_insert("job", 10, "ready")?;
@@ -87,7 +92,7 @@ type SequenceBounds<O> = (Bound<(O, Sequence)>, Bound<(O, Sequence)>);
 ///     .expect_err("the primary key is already occupied");
 /// assert_eq!(("job", 20, "duplicate"), rejected.into_parts());
 /// assert_eq!(Some(&"ready"), queue.get("job"));
-/// # Ok::<(), qubit_collections::TryInsertError<&str, i32, &str>>(())
+/// # Ok::<(), qubit_collections::map::ordered_index_map::TryInsertError<&str, i32, &str>>(())
 /// ```
 ///
 /// # Type Parameters

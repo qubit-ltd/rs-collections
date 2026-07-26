@@ -8,7 +8,7 @@
 // qubit-style: allow source-test-pair
 //! Owned record returned by replacement and removal operations.
 
-use crate::IndexState;
+use super::IndexState;
 
 /// Owned key, order, value, and prior attachment state for one record.
 ///

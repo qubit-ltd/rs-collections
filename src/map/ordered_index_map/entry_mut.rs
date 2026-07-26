@@ -8,7 +8,7 @@
 // qubit-style: allow source-test-pair
 //! Exclusive value view of one primary record.
 
-use crate::IndexState;
+use super::IndexState;
 
 /// Shared key and order plus exclusive value access for one record.
 ///

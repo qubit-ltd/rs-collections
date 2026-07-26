@@ -8,7 +8,7 @@
 // qubit-style: allow source-test-pair
 //! Reusable private storage addressed by stable internal slot identifiers.
 
-use crate::internal::SlotId;
+use super::SlotId;
 
 /// Stores values in reusable slots whose identifiers never leave the owner map.
 ///

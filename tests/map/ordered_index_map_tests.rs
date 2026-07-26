@@ -24,10 +24,10 @@ use std::sync::atomic::{
     Ordering as AtomicOrdering,
 };
 
-use qubit_collections::{
+use qubit_collections::map::OrderedIndexMap;
+use qubit_collections::map::ordered_index_map::{
     ExtractRange,
     IndexState,
-    OrderedIndexMap,
     TryInsertError,
 };
 

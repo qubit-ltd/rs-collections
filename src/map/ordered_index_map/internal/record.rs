@@ -8,8 +8,9 @@
 // qubit-style: allow source-test-pair
 //! Primary record stored once in the private arena.
 
-use crate::IndexState;
-use crate::internal::Sequence;
+use crate::map::ordered_index_map::IndexState;
+
+use super::Sequence;
 
 /// Owns one primary key, retained order, value, and optional attachment
 /// sequence.

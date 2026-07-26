@@ -14,10 +14,9 @@ use std::hash::{
     Hash,
 };
 
-use crate::OwnedEntry;
-
 use super::{
     OrderedIndexMap,
+    OwnedEntry,
     SequenceBounds,
 };
 

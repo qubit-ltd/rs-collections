@@ -6,7 +6,7 @@ rust-version = "1.94"
 authors = ["Haixing Hu <starfish.hu@gmail.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/qubit-ltd/rs-collections"
-description = "Focused collection types with explicitly maintained secondary indexes"
+description = "Custom collection types for specialized access and traversal patterns"
 homepage = "https://github.com/qubit-ltd/rs-collections"
 documentation = "https://docs.rs/qubit-collections"
 readme = "README.md"
@@ -34,4 +34,5 @@ criterion = { version = "0.8.2", default-features = false }
 
 [[bench]]
 name = "ordered_index_map"
+path = "benches/map/ordered_index_map.rs"
 harness = false

@@ -5,16 +5,9 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
+// qubit-style: allow source-test-pair
+//! Map collection types.
 
-use qubit_collections::map::OrderedIndexMap;
+pub mod ordered_index_map;
 
-mod map;
-
-/// Verifies that the map category reexports its core collection type.
-#[test]
-fn test_map_reexports_ordered_index_map() {
-    let mut map = OrderedIndexMap::new();
-    map.insert("key", 1, "value");
-
-    assert_eq!(Some(&"value"), map.get("key"));
-}
+pub use ordered_index_map::OrderedIndexMap;

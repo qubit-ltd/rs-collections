@@ -18,10 +18,8 @@ use std::collections::HashMap;
 use std::ops::Bound;
 
 use libfuzzer_sys::fuzz_target;
-use qubit_collections::{
-    IndexState,
-    OrderedIndexMap,
-};
+use qubit_collections::map::OrderedIndexMap;
+use qubit_collections::map::ordered_index_map::IndexState;
 
 /// Maximum bytes processed by one fuzz iteration.
 const MAX_INPUT_SIZE: usize = 4 * 1024;

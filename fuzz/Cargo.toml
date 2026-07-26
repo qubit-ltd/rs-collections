@@ -13,7 +13,7 @@ qubit-collections = { path = ".." }
 
 [[bin]]
 name = "ordered_index_map_state_machine"
-path = "fuzz_targets/ordered_index_map_state_machine.rs"
+path = "fuzz_targets/map/ordered_index_map_state_machine.rs"
 test = false
 doc = false
 bench = false
