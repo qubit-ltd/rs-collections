@@ -46,7 +46,7 @@ synchronization primitive appropriate for its owner.
 
 ```toml
 [dependencies]
-qubit-collections = "0.1"
+qubit-collections = "0.2"
 ```
 
 ## Quick start

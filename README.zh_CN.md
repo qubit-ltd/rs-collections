@@ -43,7 +43,7 @@ Map 之外维护一个可独立管理的有序次级索引。它支持按 `K` �
 
 ```toml
 [dependencies]
-qubit-collections = "0.1"
+qubit-collections = "0.2"
 ```
 
 ## 快速开始
