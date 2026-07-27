@@ -1,6 +1,6 @@
 [package]
 name = "qubit-collections"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.94"
 authors = ["Haixing Hu <starfish.hu@gmail.com>"]
@@ -17,9 +17,9 @@ include = [
     "/LICENSE",
     "/README.md",
     "/README.zh_CN.md",
-    "/benches/**",
     "/src/**",
     "/tests/**",
+    "/benches/**",
 ]
 
 [lib]
@@ -30,7 +30,7 @@ doctest = true
 hashbrown = { version = "0.17", default-features = false }
 
 [dev-dependencies]
-criterion = { version = "0.8.2", default-features = false }
+criterion = { version = "0.8", default-features = false }
 
 [[bench]]
 name = "ordered_index_map"
