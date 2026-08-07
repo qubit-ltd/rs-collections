@@ -8,28 +8,20 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::hash::{
-    BuildHasherDefault,
-    Hash,
-    Hasher,
-};
+use std::hash::BuildHasherDefault;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::ops::Bound;
-use std::panic::{
-    AssertUnwindSafe,
-    catch_unwind,
-};
+use std::panic::AssertUnwindSafe;
+use std::panic::catch_unwind;
 use std::sync::Arc;
-use std::sync::atomic::{
-    AtomicBool,
-    Ordering as AtomicOrdering,
-};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering as AtomicOrdering;
 
 use qubit_collections::map::OrderedIndexMap;
-use qubit_collections::map::ordered_index_map::{
-    ExtractRange,
-    IndexState,
-    TryInsertError,
-};
+use qubit_collections::map::ordered_index_map::ExtractRange;
+use qubit_collections::map::ordered_index_map::IndexState;
+use qubit_collections::map::ordered_index_map::TryInsertError;
 
 /// Primary key that intentionally does not implement [`Clone`].
 #[derive(Debug, Eq, Hash, PartialEq)]

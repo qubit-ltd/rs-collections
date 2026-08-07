@@ -17,33 +17,26 @@ mod internal;
 mod owned_entry;
 mod try_insert_error;
 
-pub use detach_range::DetachRange;
-pub use detached_entry_mut::DetachedEntryMut;
-pub use entry_mut::EntryMut;
-pub use entry_ref::EntryRef;
-pub use extract_range::ExtractRange;
-pub use index_state::IndexState;
-pub use owned_entry::OwnedEntry;
-pub use try_insert_error::TryInsertError;
-
 use std::borrow::Borrow;
 use std::collections::hash_map::RandomState;
 use std::fmt;
-use std::hash::{
-    BuildHasher,
-    Hash,
-};
-use std::ops::{
-    Bound,
-    RangeBounds,
-};
+use std::hash::BuildHasher;
+use std::hash::Hash;
+use std::ops::Bound;
+use std::ops::RangeBounds;
 
-use self::internal::{
-    InternalState,
-    Record,
-    Sequence,
-    SlotId,
-};
+pub use self::detach_range::DetachRange;
+pub use self::detached_entry_mut::DetachedEntryMut;
+pub use self::entry_mut::EntryMut;
+pub use self::entry_ref::EntryRef;
+pub use self::extract_range::ExtractRange;
+pub use self::index_state::IndexState;
+use self::internal::InternalState;
+use self::internal::Record;
+use self::internal::Sequence;
+use self::internal::SlotId;
+pub use self::owned_entry::OwnedEntry;
+pub use self::try_insert_error::TryInsertError;
 
 /// Expanded bounds over an order key and its stable sequence.
 type SequenceBounds<O> = (Bound<(O, Sequence)>, Bound<(O, Sequence)>);

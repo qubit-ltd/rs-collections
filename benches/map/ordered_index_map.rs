@@ -7,16 +7,15 @@
 // =============================================================================
 //! Benchmarks primary-key, ordered iteration, and range mutations.
 
-use criterion::{
-    BatchSize,
-    BenchmarkId,
-    Criterion,
-    Throughput,
-    criterion_group,
-    criterion_main,
-};
-use qubit_collections::map::OrderedIndexMap;
 use std::hint::black_box;
+
+use criterion::BatchSize;
+use criterion::BenchmarkId;
+use criterion::Criterion;
+use criterion::Throughput;
+use criterion::criterion_group;
+use criterion::criterion_main;
+use qubit_collections::map::OrderedIndexMap;
 
 /// Representative populations from small registries to larger schedulers.
 const ENTRY_COUNTS: [usize; 3] = [64, 1_024, 16_384];
