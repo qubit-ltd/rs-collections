@@ -62,8 +62,7 @@ struct PanicEq {
 impl PartialEq for PanicEq {
     fn eq(&self, other: &Self) -> bool {
         assert!(
-            !self.panic.load(AtomicOrdering::SeqCst)
-                && !other.panic.load(AtomicOrdering::SeqCst),
+            !self.panic.load(AtomicOrdering::SeqCst) && !other.panic.load(AtomicOrdering::SeqCst),
             "intentional equality panic",
         );
         self.value == other.value
@@ -128,10 +127,7 @@ struct PanicDrop {
 
 impl Drop for PanicDrop {
     fn drop(&mut self) {
-        assert!(
-            !self.panic.load(AtomicOrdering::SeqCst),
-            "intentional destructor panic",
-        );
+        assert!(!self.panic.load(AtomicOrdering::SeqCst), "intentional destructor panic",);
     }
 }
 
@@ -187,10 +183,7 @@ impl Eq for PanicHash {}
 
 impl Hash for PanicHash {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        assert!(
-            !self.panic.load(AtomicOrdering::SeqCst),
-            "intentional hash panic",
-        );
+        assert!(!self.panic.load(AtomicOrdering::SeqCst), "intentional hash panic",);
         self.value.hash(state);
     }
 }
@@ -238,11 +231,7 @@ fn ordered_model(model: &HashMap<u8, ModelEntry>) -> Vec<(u8, u8, i16)> {
 }
 
 /// Returns attached model records whose orders are in an inclusive range.
-fn ordered_model_range(
-    model: &HashMap<u8, ModelEntry>,
-    lower: u8,
-    upper: u8,
-) -> Vec<(u8, u8, i16)> {
+fn ordered_model_range(model: &HashMap<u8, ModelEntry>, lower: u8, upper: u8) -> Vec<(u8, u8, i16)> {
     ordered_model(model)
         .into_iter()
         .filter(|(_, order, _)| (lower..=upper).contains(order))
@@ -250,16 +239,10 @@ fn ordered_model_range(
 }
 
 /// Verifies every public read view against the model.
-fn assert_matches_model(
-    map: &OrderedIndexMap<u8, u8, i16>,
-    model: &HashMap<u8, ModelEntry>,
-) {
+fn assert_matches_model(map: &OrderedIndexMap<u8, u8, i16>, model: &HashMap<u8, ModelEntry>) {
     assert_eq!(model.len(), map.len());
     assert_eq!(
-        model
-            .values()
-            .filter(|entry| entry.sequence.is_some())
-            .count(),
+        model.values().filter(|entry| entry.sequence.is_some()).count(),
         map.attached_len(),
     );
     let actual = map
@@ -362,15 +345,12 @@ fn test_try_insert_error_implements_standard_error_traits() {
 
 #[test]
 fn test_extract_range_double_ended_iterator_does_not_require_key_equality() {
-    assert_double_ended_iterator::<
-        ExtractRange<'static, HashOnlyKey, u64, &'static str>,
-    >();
+    assert_double_ended_iterator::<ExtractRange<'static, HashOnlyKey, u64, &'static str>>();
 }
 
 #[test]
 fn test_pop_first_does_not_require_key_equality_or_order_cloning() {
-    let mut map =
-        OrderedIndexMap::<HashOnlyKey, NonCloneOrder, &'static str>::new();
+    let mut map = OrderedIndexMap::<HashOnlyKey, NonCloneOrder, &'static str>::new();
 
     assert!(map.pop_first().is_none());
 }
@@ -476,10 +456,7 @@ fn test_ordered_index_map_owned_entry_accessors_and_consumers() {
     map.insert(2, 20, String::from("two"));
     assert_eq!(20, map.remove(&2).expect("owned order").into_order());
     map.insert(3, 30, String::from("three"));
-    assert_eq!(
-        String::from("three"),
-        map.remove(&3).expect("owned value").into_value(),
-    );
+    assert_eq!(String::from("three"), map.remove(&3).expect("owned value").into_value(),);
 }
 
 #[test]
@@ -489,10 +466,7 @@ fn test_ordered_index_map_equal_orders_are_stable() {
     map.insert(1, 10, "second");
     map.insert(3, 10, "third");
 
-    let keys = map
-        .iter_ordered()
-        .map(|entry| *entry.key())
-        .collect::<Vec<_>>();
+    let keys = map.iter_ordered().map(|entry| *entry.key()).collect::<Vec<_>>();
     assert_eq!(vec![2, 1, 3], keys);
     assert_eq!(2, map.pop_first().expect("first record").into_key());
     assert_eq!(1, map.pop_first().expect("second record").into_key());
@@ -571,10 +545,7 @@ fn test_ordered_index_map_range_and_values_ordered() {
     map.insert(3, 20, "twenty-second");
     map.insert(4, 30, "thirty");
 
-    let values = map
-        .range(15..=20)
-        .map(|entry| *entry.value())
-        .collect::<Vec<_>>();
+    let values = map.range(15..=20).map(|entry| *entry.value()).collect::<Vec<_>>();
     assert_eq!(vec!["twenty-first", "twenty-second"], values);
     assert_eq!(
         vec!["ten", "twenty-first", "twenty-second", "thirty"],
@@ -589,26 +560,15 @@ fn test_ordered_index_map_all_range_bound_forms() {
         map.insert(key, key, key);
     }
 
-    assert_eq!(
-        vec![1],
-        map.range(1..2)
-            .map(|entry| *entry.key())
-            .collect::<Vec<_>>(),
-    );
+    assert_eq!(vec![1], map.range(1..2).map(|entry| *entry.key()).collect::<Vec<_>>(),);
     assert_eq!(
         vec![2, 3],
         map.range((Bound::Excluded(1), Bound::Unbounded,))
             .map(|entry| *entry.key())
             .collect::<Vec<_>>(),
     );
-    assert_eq!(
-        vec![0, 1],
-        map.range(..2).map(|entry| *entry.key()).collect::<Vec<_>>(),
-    );
-    assert_eq!(
-        vec![2, 3],
-        map.range(2..).map(|entry| *entry.key()).collect::<Vec<_>>(),
-    );
+    assert_eq!(vec![0, 1], map.range(..2).map(|entry| *entry.key()).collect::<Vec<_>>(),);
+    assert_eq!(vec![2, 3], map.range(2..).map(|entry| *entry.key()).collect::<Vec<_>>(),);
 
     let mut detached = map.detach_range(..2);
     while detached.next().is_some() {}
@@ -663,9 +623,7 @@ fn test_ordered_index_map_range_bounds_keep_or_exclude_every_equal_order() {
     assert_eq!(vec![30], extracted);
     assert_eq!(
         vec![20, 21, 22],
-        map.iter_ordered()
-            .map(|entry| *entry.key())
-            .collect::<Vec<_>>(),
+        map.iter_ordered().map(|entry| *entry.key()).collect::<Vec<_>>(),
     );
 }
 
@@ -675,9 +633,7 @@ fn test_ordered_index_map_range_panics_for_equal_excluded_bounds() {
 
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
-            let _entries = map
-                .range((Bound::Excluded(2), Bound::Excluded(2)))
-                .collect::<Vec<_>>();
+            let _entries = map.range((Bound::Excluded(2), Bound::Excluded(2))).collect::<Vec<_>>();
         }))
         .is_err(),
     );
@@ -689,8 +645,7 @@ fn test_ordered_index_map_detach_range_panics_for_inverted_bounds() {
 
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
-            let mut cursor =
-                map.detach_range((Bound::Included(3), Bound::Included(1)));
+            let mut cursor = map.detach_range((Bound::Included(3), Bound::Included(1)));
             let _entry = cursor.next();
         }))
         .is_err(),
@@ -703,8 +658,7 @@ fn test_ordered_index_map_extract_range_panics_for_inverted_bounds() {
 
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
-            let mut extracted =
-                map.extract_range((Bound::Included(3), Bound::Included(1)));
+            let mut extracted = map.extract_range((Bound::Included(3), Bound::Included(1)));
             let _entry = extracted.next();
         }))
         .is_err(),
@@ -737,9 +691,7 @@ fn test_ordered_index_map_detach_range_is_lending_and_double_ended() {
     assert_eq!(Some(&11), map.get(&1));
     assert_eq!(
         vec![0, 4],
-        map.iter_ordered()
-            .map(|entry| *entry.key())
-            .collect::<Vec<_>>(),
+        map.iter_ordered().map(|entry| *entry.key()).collect::<Vec<_>>(),
     );
 }
 
@@ -752,10 +704,7 @@ fn test_ordered_index_map_extract_range_removes_only_yielded_records() {
 
     let mut extracted = map.extract_range(1..=3);
     assert_eq!(1, extracted.next().expect("first extraction").into_key());
-    assert_eq!(
-        3,
-        extracted.next_back().expect("last extraction").into_key()
-    );
+    assert_eq!(3, extracted.next_back().expect("last extraction").into_key());
     drop(extracted);
 
     assert!(!map.contains_key(&1));
@@ -794,10 +743,7 @@ fn test_ordered_index_map_iter_includes_detached_records() {
         .map(|entry| (*entry.key(), entry.state()))
         .collect::<Vec<_>>();
     states.sort_unstable_by_key(|entry| entry.0);
-    assert_eq!(
-        vec![(1, IndexState::Attached), (2, IndexState::Detached),],
-        states,
-    );
+    assert_eq!(vec![(1, IndexState::Attached), (2, IndexState::Detached),], states,);
 }
 
 #[test]
@@ -1035,8 +981,7 @@ fn test_ordered_index_map_matches_bounded_mixed_operation_model() {
                             },
                         )
                     }),
-                    map.insert(key, order, value)
-                        .map(|entry| entry.into_parts()),
+                    map.insert(key, order, value).map(|entry| entry.into_parts()),
                 );
             }
             1 => {
@@ -1084,10 +1029,7 @@ fn test_ordered_index_map_matches_bounded_mixed_operation_model() {
                         },
                     )
                 });
-                assert_eq!(
-                    expected,
-                    map.remove(&key).map(|entry| entry.into_parts()),
-                );
+                assert_eq!(expected, map.remove(&key).map(|entry| entry.into_parts()),);
             }
             5 => {
                 let expected = ordered_model(&model).first().copied();
@@ -1117,10 +1059,7 @@ fn test_ordered_index_map_matches_bounded_mixed_operation_model() {
                         .try_insert(key, order, value)
                         .expect_err("occupied model key should be rejected");
                     assert_eq!((key, order, value), rejected.into_parts());
-                    assert_eq!(
-                        entry.value,
-                        map.get(&key).copied().expect("stored value")
-                    );
+                    assert_eq!(entry.value, map.get(&key).copied().expect("stored value"));
                 } else {
                     let inserted = map
                         .try_insert(key, order, value)
@@ -1141,11 +1080,7 @@ fn test_ordered_index_map_matches_bounded_mixed_operation_model() {
                 assert_eq!(
                     ordered_model_range(&model, lower, upper),
                     map.range(lower..=upper)
-                        .map(|entry| (
-                            *entry.key(),
-                            *entry.order(),
-                            *entry.value()
-                        ))
+                        .map(|entry| (*entry.key(), *entry.order(), *entry.value()))
                         .collect::<Vec<_>>(),
                 );
             }
@@ -1163,9 +1098,7 @@ fn test_ordered_index_map_matches_bounded_mixed_operation_model() {
                     } else {
                         cursor.next_back()
                     };
-                    entry.map(|entry| {
-                        (*entry.key(), *entry.order(), *entry.value())
-                    })
+                    entry.map(|entry| (*entry.key(), *entry.order(), *entry.value()))
                 };
                 assert_eq!(expected, actual);
                 if let Some((detached_key, _, _)) = expected {

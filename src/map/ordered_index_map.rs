@@ -257,10 +257,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     #[inline(always)]
     pub fn capacity(&self) -> usize {
         self.assert_healthy();
-        self.state
-            .arena
-            .capacity()
-            .min(self.state.primary.capacity())
+        self.state.arena.capacity().min(self.state.primary.capacity())
     }
 
     /// Removes every record while retaining allocated primary capacity.
@@ -307,10 +304,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     ///
     /// Panics if the map is poisoned.
     #[inline]
-    pub fn iter_ordered(
-        &self,
-    ) -> impl DoubleEndedIterator<Item = EntryRef<'_, K, O, V>> + ExactSizeIterator
-    {
+    pub fn iter_ordered(&self) -> impl DoubleEndedIterator<Item = EntryRef<'_, K, O, V>> + ExactSizeIterator {
         self.assert_healthy();
         self.state.ordered.values().map(|id| self.entry_ref(*id))
     }
@@ -327,9 +321,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     ///
     /// Panics if the map is poisoned.
     #[inline]
-    pub fn values_ordered(
-        &self,
-    ) -> impl DoubleEndedIterator<Item = &V> + ExactSizeIterator {
+    pub fn values_ordered(&self) -> impl DoubleEndedIterator<Item = &V> + ExactSizeIterator {
         self.iter_ordered().map(|entry| entry.value)
     }
 
@@ -370,10 +362,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     /// bound, equal start and end bounds are both excluded, or cloning a range
     /// bound panics.
     #[inline]
-    pub fn range<R>(
-        &self,
-        range: R,
-    ) -> impl DoubleEndedIterator<Item = EntryRef<'_, K, O, V>>
+    pub fn range<R>(&self, range: R) -> impl DoubleEndedIterator<Item = EntryRef<'_, K, O, V>>
     where
         O: Clone + Ord,
         R: RangeBounds<O>,
@@ -396,10 +385,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
 
     /// Runs one cross-index update under the poison guard.
     #[inline]
-    fn with_mutation<R>(
-        &mut self,
-        operation: impl FnOnce(&mut InternalState<K, O, V>, &S) -> R,
-    ) -> R {
+    fn with_mutation<R>(&mut self, operation: impl FnOnce(&mut InternalState<K, O, V>, &S) -> R) -> R {
         self.assert_healthy();
         self.poisoned = true;
         let result = operation(&mut self.state, &self.hash_builder);
@@ -442,10 +428,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
 
     /// Converts one detached slot into its specialized value view.
     #[inline(always)]
-    fn detached_entry_mut(
-        &mut self,
-        id: SlotId,
-    ) -> DetachedEntryMut<'_, K, O, V> {
+    fn detached_entry_mut(&mut self, id: SlotId) -> DetachedEntryMut<'_, K, O, V> {
         let record = self
             .state
             .arena
@@ -663,23 +646,17 @@ where
     /// Panics if the map is poisoned, stable sequence allocation is exhausted,
     /// or user-provided hashing, equality, ordering, cloning, or destruction
     /// code panics. A panic after mutation starts poisons the map.
-    pub fn insert(
-        &mut self,
-        key: K,
-        order: O,
-        value: V,
-    ) -> Option<OwnedEntry<K, O, V>> {
+    pub fn insert(&mut self, key: K, order: O, value: V) -> Option<OwnedEntry<K, O, V>> {
         self.assert_healthy();
         let hash = self.hash_builder.hash_one(&key);
         let previous_id = self.find_slot(&key);
         let previous_ordered_key = previous_id.and_then(|id| {
-            let record =
-                self.state.arena.get(id).expect(
-                    "primary index must reference an occupied arena slot",
-                );
-            record
-                .sequence
-                .map(|sequence| (record.order.clone(), sequence))
+            let record = self
+                .state
+                .arena
+                .get(id)
+                .expect("primary index must reference an occupied arena slot");
+            record.sequence.map(|sequence| (record.order.clone(), sequence))
         });
         let indexed_order = order.clone();
 
@@ -688,18 +665,9 @@ where
                 remove_primary_id(state, hash, id);
                 if let Some(ordered_key) = previous_ordered_key {
                     let removed = state.ordered.remove(&ordered_key);
-                    assert_eq!(
-                        removed,
-                        Some(id),
-                        "ordered index must reference replaced slot"
-                    );
+                    assert_eq!(removed, Some(id), "ordered index must reference replaced slot");
                 }
-                owned_from_record(
-                    state
-                        .arena
-                        .remove(id)
-                        .expect("replaced primary slot must be occupied"),
-                )
+                owned_from_record(state.arena.remove(id).expect("replaced primary slot must be occupied"))
             });
 
             let sequence = state.allocate_sequence();
@@ -750,12 +718,7 @@ where
     /// Panics if the map is poisoned, if stable sequence allocation is
     /// exhausted, or if user-provided hashing, equality, ordering, cloning, or
     /// destruction code panics. A panic after mutation starts poisons the map.
-    pub fn try_insert(
-        &mut self,
-        key: K,
-        order: O,
-        value: V,
-    ) -> Result<EntryMut<'_, K, O, V>, TryInsertError<K, O, V>> {
+    pub fn try_insert(&mut self, key: K, order: O, value: V) -> Result<EntryMut<'_, K, O, V>, TryInsertError<K, O, V>> {
         self.assert_healthy();
         if self.find_slot(&key).is_some() {
             return Err(TryInsertError::new(key, order, value));
@@ -811,13 +774,12 @@ where
         let hash = self.hash_builder.hash_one(key);
         let id = self.find_slot(key)?;
         let ordered_key = {
-            let record =
-                self.state.arena.get(id).expect(
-                    "primary index must reference an occupied arena slot",
-                );
-            record
-                .sequence
-                .map(|sequence| (record.order.clone(), sequence))
+            let record = self
+                .state
+                .arena
+                .get(id)
+                .expect("primary index must reference an occupied arena slot");
+            record.sequence.map(|sequence| (record.order.clone(), sequence))
         };
         Some(self.remove_slot(hash, id, ordered_key))
     }
@@ -838,10 +800,7 @@ where
     /// Panics if the map is poisoned or user-provided hashing, equality,
     /// ordering, cloning, or destruction code panics. A panic after mutation
     /// starts poisons the map.
-    pub fn detach<Q>(
-        &mut self,
-        key: &Q,
-    ) -> Option<DetachedEntryMut<'_, K, O, V>>
+    pub fn detach<Q>(&mut self, key: &Q) -> Option<DetachedEntryMut<'_, K, O, V>>
     where
         K: Borrow<Q>,
         Q: Eq + Hash + ?Sized,
@@ -849,10 +808,11 @@ where
         self.assert_healthy();
         let id = self.find_slot(key)?;
         let ordered_key = {
-            let record =
-                self.state.arena.get(id).expect(
-                    "primary index must reference an occupied arena slot",
-                );
+            let record = self
+                .state
+                .arena
+                .get(id)
+                .expect("primary index must reference an occupied arena slot");
             (record.order.clone(), record.sequence?)
         };
         self.detach_slot(id, ordered_key);
@@ -883,10 +843,11 @@ where
         self.assert_healthy();
         let id = self.find_slot(key)?;
         let indexed_order = {
-            let record =
-                self.state.arena.get(id).expect(
-                    "primary index must reference an occupied arena slot",
-                );
+            let record = self
+                .state
+                .arena
+                .get(id)
+                .expect("primary index must reference an occupied arena slot");
             if record.sequence.is_some() {
                 return None;
             }
@@ -931,31 +892,23 @@ where
         self.assert_healthy();
         let id = self.find_slot(key)?;
         let (old_ordered_key, indexed_order) = {
-            let record =
-                self.state.arena.get(id).expect(
-                    "primary index must reference an occupied arena slot",
-                );
+            let record = self
+                .state
+                .arena
+                .get(id)
+                .expect("primary index must reference an occupied arena slot");
             (
-                record
-                    .sequence
-                    .map(|sequence| (record.order.clone(), sequence)),
+                record.sequence.map(|sequence| (record.order.clone(), sequence)),
                 record.sequence.map(|_| order.clone()),
             )
         };
         Some(self.with_mutation(|state, _| {
-            let new_sequence =
-                indexed_order.as_ref().map(|_| state.allocate_sequence());
+            let new_sequence = indexed_order.as_ref().map(|_| state.allocate_sequence());
             if let Some(old_key) = old_ordered_key {
                 let removed = state.ordered.remove(&old_key);
-                assert_eq!(
-                    removed,
-                    Some(id),
-                    "ordered index must reference reordered slot"
-                );
+                assert_eq!(removed, Some(id), "ordered index must reference reordered slot");
             }
-            if let (Some(indexed_order), Some(sequence)) =
-                (indexed_order, new_sequence)
-            {
+            if let (Some(indexed_order), Some(sequence)) = (indexed_order, new_sequence) {
                 let old = state.ordered.insert((indexed_order, sequence), id);
                 assert!(old.is_none(), "ordered index sequence must be unique");
             }
@@ -1048,10 +1001,11 @@ where
         self.assert_healthy();
         let id = *self.state.ordered.first_key_value().map(|(_, id)| id)?;
         let hash = {
-            let record =
-                self.state.arena.get(id).expect(
-                    "ordered index must reference an occupied arena slot",
-                );
+            let record = self
+                .state
+                .arena
+                .get(id)
+                .expect("ordered index must reference an occupied arena slot");
             self.hash_builder.hash_one(&record.key)
         };
         Some(self.with_mutation(|state, _| {
@@ -1060,17 +1014,9 @@ where
                 .ordered
                 .pop_first()
                 .expect("first ordered slot must remain present");
-            assert_eq!(
-                removed_id, id,
-                "first ordered slot must match the preflight slot",
-            );
+            assert_eq!(removed_id, id, "first ordered slot must match the preflight slot",);
             drop(ordered_key);
-            owned_from_record(
-                state
-                    .arena
-                    .remove(id)
-                    .expect("removed primary slot must be occupied"),
-            )
+            owned_from_record(state.arena.remove(id).expect("removed primary slot must be occupied"))
         }))
     }
 }
@@ -1083,11 +1029,7 @@ where
     fn detach_slot(&mut self, id: SlotId, ordered_key: (O, Sequence)) {
         self.with_mutation(|state, _| {
             let removed = state.ordered.remove(&ordered_key);
-            assert_eq!(
-                removed,
-                Some(id),
-                "ordered index must reference detached slot"
-            );
+            assert_eq!(removed, Some(id), "ordered index must reference detached slot");
             state
                 .arena
                 .get_mut(id)
@@ -1097,28 +1039,14 @@ where
     }
 
     /// Removes one slot and both of its index references.
-    fn remove_slot(
-        &mut self,
-        hash: u64,
-        id: SlotId,
-        ordered_key: Option<(O, Sequence)>,
-    ) -> OwnedEntry<K, O, V> {
+    fn remove_slot(&mut self, hash: u64, id: SlotId, ordered_key: Option<(O, Sequence)>) -> OwnedEntry<K, O, V> {
         self.with_mutation(|state, _| {
             remove_primary_id(state, hash, id);
             if let Some(ordered_key) = ordered_key {
                 let removed = state.ordered.remove(&ordered_key);
-                assert_eq!(
-                    removed,
-                    Some(id),
-                    "ordered index must reference removed slot"
-                );
+                assert_eq!(removed, Some(id), "ordered index must reference removed slot");
             }
-            owned_from_record(
-                state
-                    .arena
-                    .remove(id)
-                    .expect("removed primary slot must be occupied"),
-            )
+            owned_from_record(state.arena.remove(id).expect("removed primary slot must be occupied"))
         })
     }
 }
@@ -1169,11 +1097,7 @@ where
 }
 
 /// Removes one exact slot identifier from the primary hash index.
-fn remove_primary_id<K, O, V>(
-    state: &mut InternalState<K, O, V>,
-    hash: u64,
-    id: SlotId,
-) {
+fn remove_primary_id<K, O, V>(state: &mut InternalState<K, O, V>, hash: u64, id: SlotId) {
     let entry = state
         .primary
         .find_entry(hash, |candidate| *candidate == id)
@@ -1202,21 +1126,13 @@ where
     assert_valid_order_range(range);
     (
         match range.start_bound() {
-            Bound::Included(order) => {
-                Bound::Included((order.clone(), Sequence(0)))
-            }
-            Bound::Excluded(order) => {
-                Bound::Excluded((order.clone(), Sequence(u64::MAX)))
-            }
+            Bound::Included(order) => Bound::Included((order.clone(), Sequence(0))),
+            Bound::Excluded(order) => Bound::Excluded((order.clone(), Sequence(u64::MAX))),
             Bound::Unbounded => Bound::Unbounded,
         },
         match range.end_bound() {
-            Bound::Included(order) => {
-                Bound::Included((order.clone(), Sequence(u64::MAX)))
-            }
-            Bound::Excluded(order) => {
-                Bound::Excluded((order.clone(), Sequence(0)))
-            }
+            Bound::Included(order) => Bound::Included((order.clone(), Sequence(u64::MAX))),
+            Bound::Excluded(order) => Bound::Excluded((order.clone(), Sequence(0))),
             Bound::Unbounded => Bound::Unbounded,
         },
     )

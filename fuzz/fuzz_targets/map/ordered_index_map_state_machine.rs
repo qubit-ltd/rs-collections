@@ -86,10 +86,7 @@ fn order_bounds(selector: u8, lower: u8, upper: u8) -> (Bound<u8>, Bound<u8>) {
 }
 
 /// Returns attached model records whose orders lie within `bounds`.
-fn ordered_model_range(
-    model: &HashMap<u8, ModelEntry>,
-    bounds: &(Bound<u8>, Bound<u8>),
-) -> Vec<(u8, u8, i16)> {
+fn ordered_model_range(model: &HashMap<u8, ModelEntry>, bounds: &(Bound<u8>, Bound<u8>)) -> Vec<(u8, u8, i16)> {
     ordered_model(model)
         .into_iter()
         .filter(|(_, order, _)| order_in_bounds(*order, bounds))
@@ -97,16 +94,10 @@ fn ordered_model_range(
 }
 
 /// Verifies public map views against the independent model.
-fn assert_matches_model(
-    map: &OrderedIndexMap<u8, u8, i16>,
-    model: &HashMap<u8, ModelEntry>,
-) {
+fn assert_matches_model(map: &OrderedIndexMap<u8, u8, i16>, model: &HashMap<u8, ModelEntry>) {
     assert_eq!(model.len(), map.len());
     assert_eq!(
-        model
-            .values()
-            .filter(|entry| entry.sequence.is_some())
-            .count(),
+        model.values().filter(|entry| entry.sequence.is_some()).count(),
         map.attached_len(),
     );
     assert_eq!(
@@ -179,8 +170,7 @@ fuzz_target!(|data: &[u8]| {
                             },
                         )
                     }),
-                    map.insert(key, order, value)
-                        .map(|entry| entry.into_parts()),
+                    map.insert(key, order, value).map(|entry| entry.into_parts()),
                 );
             }
             1 => {
@@ -193,9 +183,7 @@ fuzz_target!(|data: &[u8]| {
                     );
                     assert_eq!(Some(entry.value), map.get(&key).copied());
                 } else {
-                    let _inserted = map
-                        .try_insert(key, order, value)
-                        .expect("vacant key must be inserted");
+                    let _inserted = map.try_insert(key, order, value).expect("vacant key must be inserted");
                     model.insert(
                         key,
                         ModelEntry {
@@ -252,10 +240,7 @@ fuzz_target!(|data: &[u8]| {
                         },
                     )
                 });
-                assert_eq!(
-                    expected,
-                    map.remove(&key).map(|entry| entry.into_parts()),
-                );
+                assert_eq!(expected, map.remove(&key).map(|entry| entry.into_parts()),);
             }
             6 => {
                 let expected = ordered_model(&model).first().copied();
@@ -283,21 +268,16 @@ fuzz_target!(|data: &[u8]| {
                 assert_eq!(
                     ordered_model_range(&model, &bounds),
                     map.range(bounds.clone())
-                        .map(|entry| (
-                            *entry.key(),
-                            *entry.order(),
-                            *entry.value()
-                        ))
+                        .map(|entry| (*entry.key(), *entry.order(), *entry.value()))
                         .collect::<Vec<_>>(),
                 );
             }
             9 => {
-                let expected =
-                    ordered_model_range(&model, &bounds).first().copied();
-                let actual =
-                    map.detach_range(bounds.clone()).next().map(|entry| {
-                        (*entry.key(), *entry.order(), *entry.value())
-                    });
+                let expected = ordered_model_range(&model, &bounds).first().copied();
+                let actual = map
+                    .detach_range(bounds.clone())
+                    .next()
+                    .map(|entry| (*entry.key(), *entry.order(), *entry.value()));
                 assert_eq!(expected, actual);
                 if let Some((detached_key, _, _)) = expected {
                     model
@@ -307,14 +287,12 @@ fuzz_target!(|data: &[u8]| {
                 }
             }
             10 => {
-                let expected =
-                    ordered_model_range(&model, &bounds).last().copied();
-                let actual =
-                    map.extract_range(bounds).next_back().map(|entry| {
-                        let (key, order, value, state) = entry.into_parts();
-                        assert_eq!(IndexState::Attached, state);
-                        (key, order, value)
-                    });
+                let expected = ordered_model_range(&model, &bounds).last().copied();
+                let actual = map.extract_range(bounds).next_back().map(|entry| {
+                    let (key, order, value, state) = entry.into_parts();
+                    assert_eq!(IndexState::Attached, state);
+                    (key, order, value)
+                });
                 assert_eq!(expected, actual);
                 if let Some((extracted_key, _, _)) = expected {
                     model.remove(&extracted_key);

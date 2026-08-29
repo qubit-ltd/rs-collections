@@ -83,11 +83,7 @@ fn benchmark_insertion(criterion: &mut Criterion) {
                     OrderedIndexMap::new,
                     |mut map| {
                         for key in 0..entry_count {
-                            map.insert(
-                                black_box(key),
-                                black_box(key),
-                                black_box(key),
-                            );
+                            map.insert(black_box(key), black_box(key), black_box(key));
                         }
                         black_box(map)
                     },
@@ -105,8 +101,7 @@ fn benchmark_insertion(criterion: &mut Criterion) {
 ///
 /// * `criterion` - Criterion benchmark registry.
 fn benchmark_try_insert_vacant(criterion: &mut Criterion) {
-    let mut group =
-        criterion.benchmark_group("ordered_index_map/try_insert_vacant");
+    let mut group = criterion.benchmark_group("ordered_index_map/try_insert_vacant");
     for entry_count in ENTRY_COUNTS {
         group.throughput(Throughput::Elements(entry_count as u64));
         group.bench_with_input(
@@ -118,12 +113,8 @@ fn benchmark_try_insert_vacant(criterion: &mut Criterion) {
                     |mut map| {
                         for key in 0..entry_count {
                             let _ = black_box(
-                                map.try_insert(
-                                    black_box(key),
-                                    black_box(key),
-                                    black_box(key),
-                                )
-                                .expect("generated key must be vacant"),
+                                map.try_insert(black_box(key), black_box(key), black_box(key))
+                                    .expect("generated key must be vacant"),
                             );
                         }
                         black_box(map)
@@ -142,8 +133,7 @@ fn benchmark_try_insert_vacant(criterion: &mut Criterion) {
 ///
 /// * `criterion` - Criterion benchmark registry.
 fn benchmark_try_insert_occupied(criterion: &mut Criterion) {
-    let mut group =
-        criterion.benchmark_group("ordered_index_map/try_insert_occupied");
+    let mut group = criterion.benchmark_group("ordered_index_map/try_insert_occupied");
     for entry_count in ENTRY_COUNTS {
         group.throughput(Throughput::Elements(entry_count as u64));
         group.bench_with_input(
@@ -155,12 +145,8 @@ fn benchmark_try_insert_occupied(criterion: &mut Criterion) {
                     |mut map| {
                         for key in 0..entry_count {
                             let _ = black_box(
-                                map.try_insert(
-                                    black_box(key),
-                                    black_box(key),
-                                    black_box(key),
-                                )
-                                .expect_err("generated key must be occupied"),
+                                map.try_insert(black_box(key), black_box(key), black_box(key))
+                                    .expect_err("generated key must be occupied"),
                             );
                         }
                         black_box(map)
@@ -179,8 +165,7 @@ fn benchmark_try_insert_occupied(criterion: &mut Criterion) {
 ///
 /// * `criterion` - Criterion benchmark registry.
 fn benchmark_equal_order_insertion(criterion: &mut Criterion) {
-    let mut group =
-        criterion.benchmark_group("ordered_index_map/equal_order_insertion");
+    let mut group = criterion.benchmark_group("ordered_index_map/equal_order_insertion");
     for entry_count in ENTRY_COUNTS {
         group.throughput(Throughput::Elements(entry_count as u64));
         group.bench_with_input(
@@ -191,11 +176,7 @@ fn benchmark_equal_order_insertion(criterion: &mut Criterion) {
                     OrderedIndexMap::new,
                     |mut map| {
                         for key in 0..entry_count {
-                            map.insert(
-                                black_box(key),
-                                black_box(0),
-                                black_box(key),
-                            );
+                            map.insert(black_box(key), black_box(0), black_box(key));
                         }
                         black_box(map)
                     },
@@ -213,8 +194,7 @@ fn benchmark_equal_order_insertion(criterion: &mut Criterion) {
 ///
 /// * `criterion` - Criterion benchmark registry.
 fn benchmark_shuffled_order_insertion(criterion: &mut Criterion) {
-    let mut group =
-        criterion.benchmark_group("ordered_index_map/shuffled_order_insertion");
+    let mut group = criterion.benchmark_group("ordered_index_map/shuffled_order_insertion");
     for entry_count in ENTRY_COUNTS {
         let orders = removal_keys(entry_count);
         group.throughput(Throughput::Elements(entry_count as u64));
@@ -226,11 +206,7 @@ fn benchmark_shuffled_order_insertion(criterion: &mut Criterion) {
                     OrderedIndexMap::new,
                     |mut map| {
                         for (key, order) in orders.iter().copied().enumerate() {
-                            map.insert(
-                                black_box(key),
-                                black_box(order),
-                                black_box(key),
-                            );
+                            map.insert(black_box(key), black_box(order), black_box(key));
                         }
                         black_box(map)
                     },
@@ -248,8 +224,7 @@ fn benchmark_shuffled_order_insertion(criterion: &mut Criterion) {
 ///
 /// * `criterion` - Criterion benchmark registry.
 fn benchmark_primary_lookup(criterion: &mut Criterion) {
-    let mut group =
-        criterion.benchmark_group("ordered_index_map/primary_lookup");
+    let mut group = criterion.benchmark_group("ordered_index_map/primary_lookup");
     for entry_count in ENTRY_COUNTS {
         let map = populated_map(entry_count);
         group.throughput(Throughput::Elements(entry_count as u64));
@@ -305,8 +280,7 @@ fn benchmark_detach_range(criterion: &mut Criterion) {
                 bencher.iter_batched_ref(
                     || populated_map(entry_count),
                     |map| {
-                        let mut cursor =
-                            map.detach_range(..=black_box(upper_bound));
+                        let mut cursor = map.detach_range(..=black_box(upper_bound));
                         while let Some(entry) = cursor.next() {
                             let _entry = black_box(entry);
                         }
@@ -325,8 +299,7 @@ fn benchmark_detach_range(criterion: &mut Criterion) {
 ///
 /// * `criterion` - Criterion benchmark registry.
 fn benchmark_extract_range(criterion: &mut Criterion) {
-    let mut group =
-        criterion.benchmark_group("ordered_index_map/extract_range");
+    let mut group = criterion.benchmark_group("ordered_index_map/extract_range");
     for entry_count in ENTRY_COUNTS {
         let upper_bound = entry_count / 2;
         group.throughput(Throughput::Elements((upper_bound + 1) as u64));
@@ -337,9 +310,7 @@ fn benchmark_extract_range(criterion: &mut Criterion) {
                 bencher.iter_batched_ref(
                     || populated_map(entry_count),
                     |map| {
-                        for entry in
-                            map.extract_range(..=black_box(upper_bound))
-                        {
+                        for entry in map.extract_range(..=black_box(upper_bound)) {
                             let _entry = black_box(entry);
                         }
                     },
@@ -357,8 +328,7 @@ fn benchmark_extract_range(criterion: &mut Criterion) {
 ///
 /// * `criterion` - Criterion benchmark registry.
 fn benchmark_due_batch_extraction(criterion: &mut Criterion) {
-    let mut group =
-        criterion.benchmark_group("ordered_index_map/due_batch_extraction");
+    let mut group = criterion.benchmark_group("ordered_index_map/due_batch_extraction");
     for entry_count in ENTRY_COUNTS {
         let due_count = entry_count / 2;
         group.throughput(Throughput::Elements(due_count as u64));
@@ -383,8 +353,7 @@ fn benchmark_due_batch_extraction(criterion: &mut Criterion) {
 
 /// Benchmarks primary removal in a deterministic non-sequential order.
 fn benchmark_primary_removal(criterion: &mut Criterion) {
-    let mut group =
-        criterion.benchmark_group("ordered_index_map/primary_removal");
+    let mut group = criterion.benchmark_group("ordered_index_map/primary_removal");
     for entry_count in ENTRY_COUNTS {
         group.throughput(Throughput::Elements(entry_count as u64));
         group.bench_with_input(
@@ -413,8 +382,7 @@ fn benchmark_primary_removal(criterion: &mut Criterion) {
 ///
 /// * `criterion` - Criterion benchmark registry.
 fn benchmark_pop_first_drain(criterion: &mut Criterion) {
-    let mut group =
-        criterion.benchmark_group("ordered_index_map/pop_first_drain");
+    let mut group = criterion.benchmark_group("ordered_index_map/pop_first_drain");
     for entry_count in ENTRY_COUNTS {
         group.throughput(Throughput::Elements(entry_count as u64));
         group.bench_with_input(
@@ -438,8 +406,7 @@ fn benchmark_pop_first_drain(criterion: &mut Criterion) {
 
 /// Benchmarks ordered traversal when every record has equal priority.
 fn benchmark_equal_order_iteration(criterion: &mut Criterion) {
-    let mut group =
-        criterion.benchmark_group("ordered_index_map/equal_order_iteration");
+    let mut group = criterion.benchmark_group("ordered_index_map/equal_order_iteration");
     for entry_count in ENTRY_COUNTS {
         let map = equal_order_map(entry_count);
         group.throughput(Throughput::Elements(entry_count as u64));
@@ -464,8 +431,7 @@ fn benchmark_equal_order_iteration(criterion: &mut Criterion) {
 ///
 /// * `criterion` - Criterion benchmark registry.
 fn benchmark_values_ordered(criterion: &mut Criterion) {
-    let mut group =
-        criterion.benchmark_group("ordered_index_map/values_ordered");
+    let mut group = criterion.benchmark_group("ordered_index_map/values_ordered");
     for entry_count in ENTRY_COUNTS {
         let map = populated_map(entry_count);
         group.throughput(Throughput::Elements(entry_count as u64));
