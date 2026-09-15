@@ -1,1 +1,7 @@
 /target/
+
+# Keep smoke-generated corpus locally while retaining the reviewed seed files.
+/corpus/ordered_index_map_state_machine/*
+!/corpus/ordered_index_map_state_machine/equal_orders
+!/corpus/ordered_index_map_state_machine/range_edges
+!/corpus/ordered_index_map_state_machine/state_transitions
