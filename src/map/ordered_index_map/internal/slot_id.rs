@@ -5,7 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow source-test-pair
 //! Private stable index into the record arena.
 
 /// Identifies one occupied arena slot while the map remains healthy.

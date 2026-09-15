@@ -5,7 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow source-test-pair
 //! Exclusive value view returned after detaching a record.
 
 /// Shared key and order plus exclusive value access for a detached record.

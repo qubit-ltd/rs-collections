@@ -5,7 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow source-test-pair
 //! Attachment state of a primary record's ordered index.
 
 /// Describes whether a primary record participates in ordered operations.

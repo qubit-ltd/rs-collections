@@ -5,7 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow source-test-pair
 //! Stable tie-breaking sequence for attached records.
 
 /// Orders records that share the same secondary key.

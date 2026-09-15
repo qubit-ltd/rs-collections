@@ -5,7 +5,6 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-// qubit-style: allow source-test-pair
 //! Lending cursor for detaching an ordered range.
 
 use std::collections::hash_map::RandomState;
