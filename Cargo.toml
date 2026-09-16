@@ -27,10 +27,10 @@ name = "qubit_collections"
 doctest = true
 
 [dependencies]
-hashbrown = { version = "0.17", default-features = false }
+hashbrown = { version = "^0.17", default-features = false }
 
 [dev-dependencies]
-criterion = { version = "0.8", default-features = false }
+criterion = { version = "^0.8", default-features = false }
 
 [[bench]]
 name = "ordered_index_map"
