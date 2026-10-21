@@ -7,6 +7,8 @@
 // =============================================================================
 //! Consistent storage updated inside one poisoning transaction.
 
+use std::collections::BTreeMap;
+
 use hashbrown::HashTable;
 
 use super::EntryArena;
@@ -28,7 +30,7 @@ pub(crate) struct InternalState<K, O, V> {
     /// Hash index containing only arena identifiers.
     pub(crate) primary: HashTable<SlotId>,
     /// Ordered index from secondary key and sequence to arena identifier.
-    pub(crate) ordered: std::collections::BTreeMap<(O, Sequence), SlotId>,
+    pub(crate) ordered: BTreeMap<(O, Sequence), SlotId>,
     /// Next stable sequence assigned by insertion or attachment.
     pub(crate) next_sequence: u64,
 }
@@ -45,7 +47,7 @@ impl<K, O, V> InternalState<K, O, V> {
         Self {
             arena: EntryArena::new(),
             primary: HashTable::new(),
-            ordered: std::collections::BTreeMap::new(),
+            ordered: BTreeMap::new(),
             next_sequence: 0,
         }
     }
@@ -65,7 +67,7 @@ impl<K, O, V> InternalState<K, O, V> {
         Self {
             arena: EntryArena::with_capacity(capacity),
             primary: HashTable::with_capacity(capacity),
-            ordered: std::collections::BTreeMap::new(),
+            ordered: BTreeMap::new(),
             next_sequence: 0,
         }
     }
