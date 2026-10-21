@@ -26,6 +26,22 @@ use super::internal::SlotId;
 /// * `O` - Ordered secondary key type.
 /// * `V` - Stored value type.
 /// * `S` - Hash builder used by the primary index.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_collections::map::OrderedIndexMap;
+///
+/// let mut map = OrderedIndexMap::new();
+/// map.insert("first", 1, "one");
+/// map.insert("second", 2, "two");
+///
+/// let mut range = map.detach_range(1..=2);
+/// assert_eq!("one", *range.next().expect("matching record").value());
+/// assert!(!range.is_empty());
+/// assert_eq!("two", *range.next().expect("matching record").value());
+/// assert!(range.is_empty());
+/// ```
 #[must_use = "the cursor detaches records only while it is advanced"]
 pub struct DetachRange<'a, K, O, V, S = RandomState> {
     /// Exclusively borrowed owner map.
@@ -88,6 +104,7 @@ where
     ///
     /// Panics if the owner map is poisoned or comparing ordered keys panics.
     #[must_use]
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.map.assert_healthy();
         self.map

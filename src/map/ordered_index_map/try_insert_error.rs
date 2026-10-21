@@ -17,6 +17,21 @@ use std::fmt;
 /// * `K` - Primary key type.
 /// * `O` - Ordered secondary key type.
 /// * `V` - Stored value type.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_collections::map::OrderedIndexMap;
+///
+/// let mut map = OrderedIndexMap::new();
+/// map.try_insert("task", 1, "queued")?;
+/// let error = match map.try_insert("task", 2, "retry") {
+///     Ok(_) => panic!("an occupied key must be rejected"),
+///     Err(error) => error,
+/// };
+/// assert_eq!(("task", 2, "retry"), error.into_parts());
+/// # Ok::<(), qubit_collections::map::ordered_index_map::TryInsertError<&str, i32, &str>>(())
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use = "the error contains the input that was not inserted"]
 pub struct TryInsertError<K, O, V> {

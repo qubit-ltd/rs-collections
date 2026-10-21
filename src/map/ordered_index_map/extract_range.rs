@@ -64,6 +64,9 @@ where
 {
     type Item = OwnedEntry<K, O, V>;
 
+    /// Removes and returns the first remaining entry in the requested range.
+    ///
+    /// Returns `None` when no entries remain within the range.
     fn next(&mut self) -> Option<Self::Item> {
         self.map.assert_healthy();
         let (ordered_key, id) = self
@@ -92,6 +95,9 @@ where
     O: Ord + Clone,
     S: BuildHasher,
 {
+    /// Removes and returns the last remaining entry in the requested range.
+    ///
+    /// Returns `None` when no entries remain within the range.
     fn next_back(&mut self) -> Option<Self::Item> {
         self.map.assert_healthy();
         let (ordered_key, id) = self
