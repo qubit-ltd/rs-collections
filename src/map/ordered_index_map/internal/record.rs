@@ -37,7 +37,7 @@ impl<K, O, V> Record<K, O, V> {
     ///
     /// [`IndexState::Attached`] when a sequence is present.
     #[must_use = "the attachment state describes ordered visibility"]
-    #[inline(always)]
+    #[inline]
     pub(crate) const fn state(&self) -> IndexState {
         if self.sequence.is_some() {
             IndexState::Attached

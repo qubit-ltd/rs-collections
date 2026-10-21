@@ -65,7 +65,7 @@ impl<T> EntryArena<T> {
     ///
     /// The number of stored values.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub(crate) const fn len(&self) -> usize {
         self.len
     }
@@ -76,7 +76,7 @@ impl<T> EntryArena<T> {
     ///
     /// The slot vector capacity.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub(crate) fn capacity(&self) -> usize {
         self.slots.capacity()
     }
@@ -136,7 +136,7 @@ impl<T> EntryArena<T> {
     /// Panics when `id` is outside the private arena, which indicates an
     /// internal index invariant violation.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub(crate) fn get(&self, id: SlotId) -> Option<&T> {
         self.slots[id.0].as_ref()
     }
@@ -156,7 +156,7 @@ impl<T> EntryArena<T> {
     /// Panics when `id` is outside the private arena, which indicates an
     /// internal index invariant violation.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub(crate) fn get_mut(&mut self, id: SlotId) -> Option<&mut T> {
         self.slots[id.0].as_mut()
     }

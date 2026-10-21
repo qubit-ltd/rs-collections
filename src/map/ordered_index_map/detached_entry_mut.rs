@@ -14,6 +14,21 @@
 /// * `K` - Primary key type.
 /// * `O` - Ordered secondary key type.
 /// * `V` - Stored value type.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_collections::map::OrderedIndexMap;
+///
+/// let mut map = OrderedIndexMap::new();
+/// map.try_insert("job", 10, "ready")?;
+/// let mut detached = map.detach("job").expect("job is attached");
+/// assert_eq!("job", *detached.key());
+/// assert_eq!(10, *detached.order());
+/// *detached.value_mut() = "running";
+/// assert_eq!("running", *detached.value());
+/// # Ok::<(), qubit_collections::map::ordered_index_map::TryInsertError<&str, i32, &str>>(())
+/// ```
 #[derive(Debug)]
 #[must_use = "the detached entry view provides exclusive access to a retained value"]
 pub struct DetachedEntryMut<'a, K, O, V> {
@@ -32,7 +47,7 @@ impl<'a, K, O, V> DetachedEntryMut<'a, K, O, V> {
     ///
     /// The key retained by the detached primary record.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn key(&self) -> &K {
         self.key
     }
@@ -43,7 +58,7 @@ impl<'a, K, O, V> DetachedEntryMut<'a, K, O, V> {
     ///
     /// The order that can be reused by a later attachment.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn order(&self) -> &O {
         self.order
     }
@@ -54,7 +69,7 @@ impl<'a, K, O, V> DetachedEntryMut<'a, K, O, V> {
     ///
     /// A shared reference to the retained value.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn value(&self) -> &V {
         self.value
     }
@@ -65,7 +80,7 @@ impl<'a, K, O, V> DetachedEntryMut<'a, K, O, V> {
     ///
     /// A mutable reference that cannot change the retained key or order.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn value_mut(&mut self) -> &mut V {
         self.value
     }
@@ -76,7 +91,7 @@ impl<'a, K, O, V> DetachedEntryMut<'a, K, O, V> {
     ///
     /// The mutable value reference with the view's original lifetime.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn into_value_mut(self) -> &'a mut V {
         self.value
     }

@@ -7,6 +7,10 @@
 // =============================================================================
 //! Private stable index into the record arena.
 
-/// Identifies one occupied arena slot while the map remains healthy.
+/// Identifies an arena slot used by the map's internal indexes.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub(crate) struct SlotId(pub(crate) usize);
+pub(crate) struct SlotId(
+    /// Zero-based arena position; the slot may be reused after its value is
+    /// removed.
+    pub(crate) usize,
+);

@@ -11,6 +11,21 @@ use super::IndexState;
 
 /// Shared key and order plus exclusive value access for one record.
 ///
+/// # Examples
+///
+/// ```
+/// use qubit_collections::map::ordered_index_map::EntryMut;
+/// use qubit_collections::map::OrderedIndexMap;
+///
+/// let mut records = OrderedIndexMap::new();
+/// let entry: EntryMut<'_, _, _, _> = records
+///     .try_insert("task", 1, "pending")
+///     .expect("the primary key is vacant");
+/// assert_eq!("task", *entry.key());
+/// assert_eq!(1, *entry.order());
+/// assert_eq!("pending", *entry.value());
+/// ```
+///
 /// # Type Parameters
 ///
 /// * `K` - Primary key type.
@@ -36,7 +51,7 @@ impl<'a, K, O, V> EntryMut<'a, K, O, V> {
     ///
     /// The key retained by the primary record.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn key(&self) -> &K {
         self.key
     }
@@ -47,7 +62,7 @@ impl<'a, K, O, V> EntryMut<'a, K, O, V> {
     ///
     /// The secondary key, including while the record is detached.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn order(&self) -> &O {
         self.order
     }
@@ -58,7 +73,7 @@ impl<'a, K, O, V> EntryMut<'a, K, O, V> {
     ///
     /// A shared reference to the record's value.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn value(&self) -> &V {
         self.value
     }
@@ -69,7 +84,7 @@ impl<'a, K, O, V> EntryMut<'a, K, O, V> {
     ///
     /// A mutable reference that cannot change the indexed key or order.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn value_mut(&mut self) -> &mut V {
         self.value
     }
@@ -80,7 +95,7 @@ impl<'a, K, O, V> EntryMut<'a, K, O, V> {
     ///
     /// The mutable value reference with the view's original lifetime.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn into_value_mut(self) -> &'a mut V {
         self.value
     }
@@ -91,7 +106,7 @@ impl<'a, K, O, V> EntryMut<'a, K, O, V> {
     ///
     /// Whether ordered operations can currently observe this record.
     #[must_use = "the attachment state describes ordered visibility"]
-    #[inline(always)]
+    #[inline]
     pub const fn state(&self) -> IndexState {
         self.state
     }
@@ -102,7 +117,7 @@ impl<'a, K, O, V> EntryMut<'a, K, O, V> {
     ///
     /// `true` when ordered operations can observe this record.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn is_attached(&self) -> bool {
         matches!(self.state, IndexState::Attached)
     }
@@ -113,7 +128,7 @@ impl<'a, K, O, V> EntryMut<'a, K, O, V> {
     ///
     /// `true` when only primary-key operations can observe this record.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn is_detached(&self) -> bool {
         matches!(self.state, IndexState::Detached)
     }

@@ -16,6 +16,20 @@ use super::IndexState;
 /// * `K` - Primary key type.
 /// * `O` - Ordered secondary key type.
 /// * `V` - Stored value type.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_collections::map::OrderedIndexMap;
+///
+/// let mut map = OrderedIndexMap::new();
+/// map.insert("job", 10, "ready");
+/// let entry = map.get_entry("job").expect("the entry was just inserted");
+/// assert_eq!("job", *entry.key());
+/// assert_eq!(10, *entry.order());
+/// assert_eq!("ready", *entry.value());
+/// assert!(entry.is_attached());
+/// ```
 #[derive(Clone, Copy, Debug)]
 #[must_use = "the entry view provides access to a stored record"]
 pub struct EntryRef<'a, K, O, V> {
@@ -36,7 +50,7 @@ impl<'a, K, O, V> EntryRef<'a, K, O, V> {
     ///
     /// The key retained by the primary record.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn key(&self) -> &'a K {
         self.key
     }
@@ -47,7 +61,7 @@ impl<'a, K, O, V> EntryRef<'a, K, O, V> {
     ///
     /// The secondary key, including while the record is detached.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn order(&self) -> &'a O {
         self.order
     }
@@ -58,7 +72,7 @@ impl<'a, K, O, V> EntryRef<'a, K, O, V> {
     ///
     /// A shared reference to the record's value.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn value(&self) -> &'a V {
         self.value
     }
@@ -69,7 +83,7 @@ impl<'a, K, O, V> EntryRef<'a, K, O, V> {
     ///
     /// Whether ordered operations can currently observe this record.
     #[must_use = "the attachment state describes ordered visibility"]
-    #[inline(always)]
+    #[inline]
     pub const fn state(&self) -> IndexState {
         self.state
     }
@@ -80,7 +94,7 @@ impl<'a, K, O, V> EntryRef<'a, K, O, V> {
     ///
     /// `true` when ordered operations can observe this record.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn is_attached(&self) -> bool {
         matches!(self.state, IndexState::Attached)
     }
@@ -91,7 +105,7 @@ impl<'a, K, O, V> EntryRef<'a, K, O, V> {
     ///
     /// `true` when only primary-key operations can observe this record.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn is_detached(&self) -> bool {
         matches!(self.state, IndexState::Detached)
     }

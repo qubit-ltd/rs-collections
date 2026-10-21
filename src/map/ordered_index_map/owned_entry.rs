@@ -16,6 +16,20 @@ use super::IndexState;
 /// * `K` - Primary key type.
 /// * `O` - Ordered secondary key type.
 /// * `V` - Stored value type.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_collections::map::OrderedIndexMap;
+///
+/// let mut records = OrderedIndexMap::new();
+/// records.insert("job", 10, "ready");
+/// let record = records.remove("job").expect("the job was inserted");
+///
+/// assert_eq!(&"job", record.key());
+/// assert_eq!(&10, record.order());
+/// assert_eq!(&"ready", record.value());
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use = "the owned entry contains a removed or replaced record"]
 pub struct OwnedEntry<K, O, V> {
@@ -36,7 +50,7 @@ impl<K, O, V> OwnedEntry<K, O, V> {
     ///
     /// A shared reference to the owned key.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn key(&self) -> &K {
         &self.key
     }
@@ -47,7 +61,7 @@ impl<K, O, V> OwnedEntry<K, O, V> {
     ///
     /// A shared reference to the owned order.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn order(&self) -> &O {
         &self.order
     }
@@ -58,7 +72,7 @@ impl<K, O, V> OwnedEntry<K, O, V> {
     ///
     /// A shared reference to the owned value.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn value(&self) -> &V {
         &self.value
     }
@@ -69,7 +83,7 @@ impl<K, O, V> OwnedEntry<K, O, V> {
     ///
     /// A mutable reference to the owned value.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn value_mut(&mut self) -> &mut V {
         &mut self.value
     }
@@ -80,7 +94,7 @@ impl<K, O, V> OwnedEntry<K, O, V> {
     ///
     /// The record's state immediately before it left the map.
     #[must_use = "the attachment state describes the record before removal"]
-    #[inline(always)]
+    #[inline]
     pub const fn state(&self) -> IndexState {
         self.state
     }

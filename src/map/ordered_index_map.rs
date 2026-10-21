@@ -190,7 +190,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     ///
     /// Panics if the map is poisoned.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn len(&self) -> usize {
         self.assert_healthy();
         self.state.arena.len()
@@ -206,7 +206,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     ///
     /// Panics if the map is poisoned.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.assert_healthy();
         self.state.arena.len() == 0
@@ -222,7 +222,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     ///
     /// Panics if the map is poisoned.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn attached_len(&self) -> usize {
         self.assert_healthy();
         self.state.ordered.len()
@@ -238,7 +238,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     ///
     /// Panics if the map is poisoned.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn is_attached_empty(&self) -> bool {
         self.assert_healthy();
         self.state.ordered.is_empty()
@@ -254,7 +254,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     ///
     /// Panics if the map is poisoned.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub fn capacity(&self) -> usize {
         self.assert_healthy();
         self.state.arena.capacity().min(self.state.primary.capacity())
@@ -375,7 +375,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     }
 
     /// Requires that no earlier cross-index mutation unwound.
-    #[inline(always)]
+    #[inline]
     fn assert_healthy(&self) {
         assert!(
             !self.poisoned,
@@ -394,7 +394,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     }
 
     /// Converts one occupied slot into a shared public view.
-    #[inline(always)]
+    #[inline]
     fn entry_ref(&self, id: SlotId) -> EntryRef<'_, K, O, V> {
         let record = self
             .state
@@ -410,7 +410,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     }
 
     /// Converts one occupied slot into an exclusive public value view.
-    #[inline(always)]
+    #[inline]
     fn entry_mut(&mut self, id: SlotId) -> EntryMut<'_, K, O, V> {
         let record = self
             .state
@@ -427,7 +427,7 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     }
 
     /// Converts one detached slot into its specialized value view.
-    #[inline(always)]
+    #[inline]
     fn detached_entry_mut(&mut self, id: SlotId) -> DetachedEntryMut<'_, K, O, V> {
         let record = self
             .state

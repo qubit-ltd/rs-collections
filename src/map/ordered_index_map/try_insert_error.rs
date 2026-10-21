@@ -30,7 +30,7 @@ pub struct TryInsertError<K, O, V> {
 
 impl<K, O, V> TryInsertError<K, O, V> {
     /// Creates an error from rejected insertion input.
-    #[inline(always)]
+    #[inline]
     pub(super) const fn new(key: K, order: O, value: V) -> Self {
         Self { key, order, value }
     }
@@ -41,7 +41,7 @@ impl<K, O, V> TryInsertError<K, O, V> {
     ///
     /// A shared reference to the key that was not inserted.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn key(&self) -> &K {
         &self.key
     }
@@ -52,7 +52,7 @@ impl<K, O, V> TryInsertError<K, O, V> {
     ///
     /// A shared reference to the ordered key that was not inserted.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn order(&self) -> &O {
         &self.order
     }
@@ -63,7 +63,7 @@ impl<K, O, V> TryInsertError<K, O, V> {
     ///
     /// A shared reference to the value that was not inserted.
     #[must_use]
-    #[inline(always)]
+    #[inline]
     pub const fn value(&self) -> &V {
         &self.value
     }

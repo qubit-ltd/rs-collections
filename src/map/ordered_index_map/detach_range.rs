@@ -39,10 +39,6 @@ where
     O: Ord + Clone,
 {
     /// Detaches and returns the first remaining record in the range.
-    #[allow(
-        clippy::should_implement_trait,
-        reason = "a lending cursor cannot implement Iterator"
-    )]
     ///
     /// # Returns
     ///
@@ -53,6 +49,10 @@ where
     ///
     /// Panics if the owner map is poisoned or ordering, cloning, or destroying
     /// an ordered key panics. A panic after detachment starts poisons the map.
+    #[allow(
+        clippy::should_implement_trait,
+        reason = "a lending cursor cannot implement Iterator"
+    )]
     pub fn next(&mut self) -> Option<DetachedEntryMut<'_, K, O, V>> {
         self.map.assert_healthy();
         let (ordered_key, id) = self.first_candidate()?;

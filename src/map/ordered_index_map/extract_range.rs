@@ -32,6 +32,22 @@ use super::SequenceBounds;
 /// * `O` - Ordered secondary key type.
 /// * `V` - Stored value type.
 /// * `S` - Hash builder used by the primary index.
+///
+/// # Examples
+///
+/// ```
+/// use qubit_collections::map::ordered_index_map::ExtractRange;
+/// use qubit_collections::map::OrderedIndexMap;
+///
+/// let mut map = OrderedIndexMap::new();
+/// map.insert("first", 1, "one");
+/// map.insert("second", 2, "two");
+///
+/// let mut extracted: ExtractRange<'_, &str, i32, &str> = map.extract_range(1..=2);
+/// assert_eq!("first", extracted.next().expect("matching record").into_key());
+/// assert_eq!("two", extracted.next_back().expect("matching record").into_value());
+/// assert!(extracted.next().is_none());
+/// ```
 #[must_use = "the iterator removes records only while it is advanced"]
 pub struct ExtractRange<'a, K, O, V, S = RandomState> {
     /// Exclusively borrowed owner map.

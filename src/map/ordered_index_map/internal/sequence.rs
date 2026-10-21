@@ -9,4 +9,7 @@
 
 /// Orders records that share the same secondary key.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub(crate) struct Sequence(pub(crate) u64);
+pub(crate) struct Sequence(
+    /// Monotonically assigned order used to break ties between equal keys.
+    pub(crate) u64,
+);

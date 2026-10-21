@@ -56,12 +56,13 @@ fn ordered_model(model: &HashMap<u8, ModelEntry>) -> Vec<(u8, u8, i16)> {
 
 /// Returns whether one order key lies within `bounds`.
 fn order_in_bounds(order: u8, bounds: &(Bound<u8>, Bound<u8>)) -> bool {
-    let starts_after_lower = match bounds.0 {
+    let (lower_bound, upper_bound) = bounds;
+    let starts_after_lower = match *lower_bound {
         Bound::Included(lower) => order >= lower,
         Bound::Excluded(lower) => order > lower,
         Bound::Unbounded => true,
     };
-    let ends_before_upper = match bounds.1 {
+    let ends_before_upper = match *upper_bound {
         Bound::Included(upper) => order <= upper,
         Bound::Excluded(upper) => order < upper,
         Bound::Unbounded => true,
