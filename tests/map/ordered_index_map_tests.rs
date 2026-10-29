@@ -37,7 +37,9 @@ struct NonCloneOrder;
 
 /// Hasher that deliberately maps every key to one collision bucket.
 #[derive(Default)]
-struct ConstantHasher;
+struct ConstantHasher {
+    // empty
+}
 
 impl Hasher for ConstantHasher {
     fn finish(&self) -> u64 {
