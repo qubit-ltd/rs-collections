@@ -55,7 +55,7 @@ impl<K, O, V> TryInsertError<K, O, V> {
     /// # Returns
     ///
     /// A shared reference to the key that was not inserted.
-    #[must_use]
+    #[must_use = "the key is part of the rejected input"]
     #[inline]
     pub const fn key(&self) -> &K {
         &self.key
@@ -66,7 +66,7 @@ impl<K, O, V> TryInsertError<K, O, V> {
     /// # Returns
     ///
     /// A shared reference to the ordered key that was not inserted.
-    #[must_use]
+    #[must_use = "the ordered key is part of the rejected input"]
     #[inline]
     pub const fn order(&self) -> &O {
         &self.order
@@ -77,7 +77,7 @@ impl<K, O, V> TryInsertError<K, O, V> {
     /// # Returns
     ///
     /// A shared reference to the value that was not inserted.
-    #[must_use]
+    #[must_use = "the value is part of the rejected input"]
     #[inline]
     pub const fn value(&self) -> &V {
         &self.value

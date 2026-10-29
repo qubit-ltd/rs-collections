@@ -39,6 +39,10 @@ pub use self::owned_entry::OwnedEntry;
 pub use self::try_insert_error::TryInsertError;
 
 /// Expanded bounds over an order key and its stable sequence.
+///
+/// # Type Parameters
+///
+/// * `O` - Ordered secondary-key type.
 type SequenceBounds<O> = (Bound<(O, Sequence)>, Bound<(O, Sequence)>);
 
 /// A primary-key map with an independently managed ordered secondary index.
@@ -110,7 +114,6 @@ impl<K, O, V> OrderedIndexMap<K, O, V, RandomState> {
     /// # Returns
     ///
     /// An empty map using a randomly seeded hash builder.
-    #[must_use = "the new map must be retained to store records"]
     #[inline]
     pub fn new() -> Self {
         Self::with_hasher(RandomState::new())
@@ -129,7 +132,6 @@ impl<K, O, V> OrderedIndexMap<K, O, V, RandomState> {
     /// # Panics
     ///
     /// Panics if reserving `capacity` records overflows or allocation fails.
-    #[must_use = "the new map must be retained to store records"]
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         Self::with_capacity_and_hasher(capacity, RandomState::new())
@@ -146,7 +148,6 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     /// # Returns
     ///
     /// An empty map using `hash_builder`.
-    #[must_use = "the new map must be retained to store records"]
     #[inline]
     pub const fn with_hasher(hash_builder: S) -> Self {
         Self {
@@ -170,7 +171,6 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     /// # Panics
     ///
     /// Panics if reserving `capacity` records overflows or allocation fails.
-    #[must_use = "the new map must be retained to store records"]
     #[inline]
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
         Self {
@@ -334,7 +334,6 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     /// # Panics
     ///
     /// Panics if the map is poisoned.
-    #[must_use]
     #[inline]
     pub fn first(&self) -> Option<EntryRef<'_, K, O, V>>
     where
@@ -361,6 +360,10 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     /// Panics if the map is poisoned, the start bound is greater than the end
     /// bound, equal start and end bounds are both excluded, or cloning a range
     /// bound panics.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `R` - Range-bounds type that borrows secondary keys.
     #[inline]
     pub fn range<R>(&self, range: R) -> impl DoubleEndedIterator<Item = EntryRef<'_, K, O, V>>
     where
@@ -384,6 +387,10 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     }
 
     /// Runs one cross-index update under the poison guard.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `R` - Result type returned by the mutation closure.
     #[inline]
     fn with_mutation<R>(&mut self, operation: impl FnOnce(&mut InternalState<K, O, V>, &S) -> R) -> R {
         self.assert_healthy();
@@ -450,6 +457,141 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S>
 where
     S: BuildHasher,
 {
+    /// Reports whether a borrowed primary key is present.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to locate.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key type used to query the primary index.
+    ///
+    /// # Returns
+    ///
+    /// `true` when the primary index contains an equivalent key.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or hashing or comparing `key` panics.
+    #[must_use]
+    #[inline]
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        self.find_slot(key).is_some()
+    }
+
+    /// Returns a stored value by borrowed primary key.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to locate.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key type used to query the primary index.
+    ///
+    /// # Returns
+    ///
+    /// The stored value, or `None` when `key` is absent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or hashing or comparing `key` panics.
+    #[inline]
+    pub fn get<Q>(&self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        let id = self.find_slot(key)?;
+        Some(&self.state.arena.get(id)?.value)
+    }
+
+    /// Returns exclusive value access by borrowed primary key.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to locate.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key type used to query the primary index.
+    ///
+    /// # Returns
+    ///
+    /// Exclusive access to the stored value, or `None` when `key` is absent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or hashing or comparing `key` panics.
+    #[inline]
+    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
+    where
+        K: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        let id = self.find_slot(key)?;
+        Some(&mut self.state.arena.get_mut(id)?.value)
+    }
+
+    /// Returns a complete shared record view by borrowed primary key.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to locate.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key type used to query the primary index.
+    ///
+    /// # Returns
+    ///
+    /// A shared record view, or `None` when `key` is absent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or hashing or comparing `key` panics.
+    #[inline]
+    pub fn get_entry<Q>(&self, key: &Q) -> Option<EntryRef<'_, K, O, V>>
+    where
+        K: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        self.find_slot(key).map(|id| self.entry_ref(id))
+    }
+
+    /// Returns a complete record view with exclusive value access.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to locate.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key type used to query the primary index.
+    ///
+    /// # Returns
+    ///
+    /// A record view with exclusive value access, or `None` when `key` is
+    /// absent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or hashing or comparing `key` panics.
+    #[inline]
+    pub fn get_entry_mut<Q>(&mut self, key: &Q) -> Option<EntryMut<'_, K, O, V>>
+    where
+        K: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        let id = self.find_slot(key)?;
+        Some(self.entry_mut(id))
+    }
+
     /// Reserves primary capacity for at least `additional` more records.
     ///
     /// # Parameters
@@ -479,126 +621,11 @@ where
         });
     }
 
-    /// Reports whether a borrowed primary key is present.
-    ///
-    /// # Parameters
-    ///
-    /// * `key` - Borrowed form of the primary key to locate.
-    ///
-    /// # Returns
-    ///
-    /// `true` when the primary index contains an equivalent key.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the map is poisoned or hashing or comparing `key` panics.
-    #[must_use]
-    #[inline]
-    pub fn contains_key<Q>(&self, key: &Q) -> bool
-    where
-        K: Borrow<Q>,
-        Q: Eq + Hash + ?Sized,
-    {
-        self.find_slot(key).is_some()
-    }
-
-    /// Returns a stored value by borrowed primary key.
-    ///
-    /// # Parameters
-    ///
-    /// * `key` - Borrowed form of the primary key to locate.
-    ///
-    /// # Returns
-    ///
-    /// The stored value, or `None` when `key` is absent.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the map is poisoned or hashing or comparing `key` panics.
-    #[must_use]
-    #[inline]
-    pub fn get<Q>(&self, key: &Q) -> Option<&V>
-    where
-        K: Borrow<Q>,
-        Q: Eq + Hash + ?Sized,
-    {
-        let id = self.find_slot(key)?;
-        Some(&self.state.arena.get(id)?.value)
-    }
-
-    /// Returns exclusive value access by borrowed primary key.
-    ///
-    /// # Parameters
-    ///
-    /// * `key` - Borrowed form of the primary key to locate.
-    ///
-    /// # Returns
-    ///
-    /// Exclusive access to the stored value, or `None` when `key` is absent.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the map is poisoned or hashing or comparing `key` panics.
-    #[must_use]
-    #[inline]
-    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
-    where
-        K: Borrow<Q>,
-        Q: Eq + Hash + ?Sized,
-    {
-        let id = self.find_slot(key)?;
-        Some(&mut self.state.arena.get_mut(id)?.value)
-    }
-
-    /// Returns a complete shared record view by borrowed primary key.
-    ///
-    /// # Parameters
-    ///
-    /// * `key` - Borrowed form of the primary key to locate.
-    ///
-    /// # Returns
-    ///
-    /// A shared record view, or `None` when `key` is absent.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the map is poisoned or hashing or comparing `key` panics.
-    #[must_use]
-    #[inline]
-    pub fn get_entry<Q>(&self, key: &Q) -> Option<EntryRef<'_, K, O, V>>
-    where
-        K: Borrow<Q>,
-        Q: Eq + Hash + ?Sized,
-    {
-        self.find_slot(key).map(|id| self.entry_ref(id))
-    }
-
-    /// Returns a complete record view with exclusive value access.
-    ///
-    /// # Parameters
-    ///
-    /// * `key` - Borrowed form of the primary key to locate.
-    ///
-    /// # Returns
-    ///
-    /// A record view with exclusive value access, or `None` when `key` is
-    /// absent.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the map is poisoned or hashing or comparing `key` panics.
-    #[must_use]
-    #[inline]
-    pub fn get_entry_mut<Q>(&mut self, key: &Q) -> Option<EntryMut<'_, K, O, V>>
-    where
-        K: Borrow<Q>,
-        Q: Eq + Hash + ?Sized,
-    {
-        let id = self.find_slot(key)?;
-        Some(self.entry_mut(id))
-    }
-
     /// Finds one arena slot through the primary hash index.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key type used to query the primary index.
     #[inline]
     fn find_slot<Q>(&self, key: &Q) -> Option<SlotId>
     where
@@ -755,6 +782,10 @@ where
     ///
     /// * `key` - Borrowed form of the primary key to remove.
     ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key type used to query the primary index.
+    ///
     /// # Returns
     ///
     /// The removed record and its prior attachment state, or `None` when
@@ -790,6 +821,10 @@ where
     ///
     /// * `key` - Borrowed form of the primary key to detach.
     ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key type used to query the primary index.
+    ///
     /// # Returns
     ///
     /// Exclusive value access for the detached record, or `None` when `key` is
@@ -824,6 +859,10 @@ where
     /// # Parameters
     ///
     /// * `key` - Borrowed form of the primary key to attach.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key type used to query the primary index.
     ///
     /// # Returns
     ///
@@ -874,6 +913,10 @@ where
     ///
     /// * `key` - Borrowed form of the primary key to reorder.
     /// * `order` - New ordered secondary key retained by the record.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key type used to query the primary index.
     ///
     /// # Returns
     ///
@@ -935,6 +978,10 @@ where
     ///
     /// A lending, double-ended cursor over matching attached records.
     ///
+    /// # Type Parameters
+    ///
+    /// * `R` - Range-bounds type that borrows secondary keys.
+    ///
     /// # Panics
     ///
     /// Panics if the map is poisoned, the start bound is greater than the end
@@ -962,6 +1009,10 @@ where
     /// # Returns
     ///
     /// A double-ended iterator that owns each removed record.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `R` - Range-bounds type that borrows secondary keys.
     ///
     /// # Panics
     ///
@@ -1097,6 +1148,12 @@ where
 }
 
 /// Removes one exact slot identifier from the primary hash index.
+///
+/// # Type Parameters
+///
+/// * `K` - Primary-key type stored in the map.
+/// * `O` - Ordered secondary-key type stored in the map.
+/// * `V` - Value type stored in the map.
 fn remove_primary_id<K, O, V>(state: &mut InternalState<K, O, V>, hash: u64, id: SlotId) {
     let entry = state
         .primary
@@ -1107,6 +1164,12 @@ fn remove_primary_id<K, O, V>(state: &mut InternalState<K, O, V>, hash: u64, id:
 }
 
 /// Converts a private arena record into its public owned representation.
+///
+/// # Type Parameters
+///
+/// * `K` - Primary-key type stored in the record.
+/// * `O` - Ordered secondary-key type stored in the record.
+/// * `V` - Value type stored in the record.
 fn owned_from_record<K, O, V>(record: Record<K, O, V>) -> OwnedEntry<K, O, V> {
     let state = record.state();
     OwnedEntry {
@@ -1118,6 +1181,12 @@ fn owned_from_record<K, O, V>(record: Record<K, O, V>) -> OwnedEntry<K, O, V> {
 }
 
 /// Expands order bounds to cover all stable sequences for matching orders.
+///
+/// # Type Parameters
+///
+/// * `O` - Ordered secondary-key type.
+/// * `R` - Range-bounds type that borrows secondary keys.
+#[must_use]
 fn order_range_bounds<O, R>(range: &R) -> SequenceBounds<O>
 where
     O: Clone + Ord,
@@ -1144,6 +1213,11 @@ where
 ///
 /// Panics if the start bound is greater than the end bound, or equal start and
 /// end bounds are both excluded.
+///
+/// # Type Parameters
+///
+/// * `O` - Ordered secondary-key type.
+/// * `R` - Range-bounds type that borrows secondary keys.
 fn assert_valid_order_range<O, R>(range: &R)
 where
     O: Ord,

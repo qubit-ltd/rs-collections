@@ -135,7 +135,6 @@ impl<T> EntryArena<T> {
     ///
     /// Panics when `id` is outside the private arena, which indicates an
     /// internal index invariant violation.
-    #[must_use]
     #[inline]
     pub(crate) fn get(&self, id: SlotId) -> Option<&T> {
         self.slots[id.0].as_ref()
@@ -155,7 +154,6 @@ impl<T> EntryArena<T> {
     ///
     /// Panics when `id` is outside the private arena, which indicates an
     /// internal index invariant violation.
-    #[must_use]
     #[inline]
     pub(crate) fn get_mut(&mut self, id: SlotId) -> Option<&mut T> {
         self.slots[id.0].as_mut()

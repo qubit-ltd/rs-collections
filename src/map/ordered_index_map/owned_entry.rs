@@ -77,6 +77,16 @@ impl<K, O, V> OwnedEntry<K, O, V> {
         &self.value
     }
 
+    /// Returns the attachment state before removal.
+    ///
+    /// # Returns
+    ///
+    /// The record's state immediately before it left the map.
+    #[inline]
+    pub const fn state(&self) -> IndexState {
+        self.state
+    }
+
     /// Returns exclusive access to the stored value.
     ///
     /// # Returns
@@ -86,17 +96,6 @@ impl<K, O, V> OwnedEntry<K, O, V> {
     #[inline]
     pub fn value_mut(&mut self) -> &mut V {
         &mut self.value
-    }
-
-    /// Returns the attachment state before removal.
-    ///
-    /// # Returns
-    ///
-    /// The record's state immediately before it left the map.
-    #[must_use = "the attachment state describes the record before removal"]
-    #[inline]
-    pub const fn state(&self) -> IndexState {
-        self.state
     }
 
     /// Consumes the entry and returns its primary key.

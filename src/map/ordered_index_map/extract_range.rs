@@ -66,7 +66,16 @@ where
 
     /// Removes and returns the first remaining entry in the requested range.
     ///
-    /// Returns `None` when no entries remain within the range.
+    /// # Returns
+    ///
+    /// The next matching entry, removed from the map, or `None` when no
+    /// matching entries remain.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the owner map is poisoned or user-provided hashing, ordering,
+    /// cloning, or destruction code panics. A panic after removal starts
+    /// poisons the map.
     fn next(&mut self) -> Option<Self::Item> {
         self.map.assert_healthy();
         let (ordered_key, id) = self
@@ -97,7 +106,16 @@ where
 {
     /// Removes and returns the last remaining entry in the requested range.
     ///
-    /// Returns `None` when no entries remain within the range.
+    /// # Returns
+    ///
+    /// The last matching entry, removed from the map, or `None` when no
+    /// matching entries remain.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the owner map is poisoned or user-provided hashing, ordering,
+    /// cloning, or destruction code panics. A panic after removal starts
+    /// poisons the map.
     fn next_back(&mut self) -> Option<Self::Item> {
         self.map.assert_healthy();
         let (ordered_key, id) = self
