@@ -77,6 +77,13 @@ type SequenceBounds<O> = (Bound<(O, Sequence)>, Bound<(O, Sequence)>);
 /// reordering panics if that sequence space is exhausted. [`Self::clear`]
 /// resets the sequence allocator.
 ///
+/// # Type Parameters
+///
+/// * `K` - Unique primary key type.
+/// * `O` - Possibly non-unique ordered secondary key type.
+/// * `V` - Stored value type.
+/// * `S` - Hash builder used by the primary index.
+///
 /// # Examples
 ///
 /// ```
@@ -91,13 +98,6 @@ type SequenceBounds<O> = (Bound<(O, Sequence)>, Bound<(O, Sequence)>);
 /// assert_eq!(Some(&"ready"), queue.get("job"));
 /// # Ok::<(), qubit_collections::map::ordered_index_map::TryInsertError<&str, i32, &str>>(())
 /// ```
-///
-/// # Type Parameters
-///
-/// * `K` - Unique primary key type.
-/// * `O` - Possibly non-unique ordered secondary key type.
-/// * `V` - Stored value type.
-/// * `S` - Hash builder used by the primary index.
 #[must_use = "the map owns its records and ordered index"]
 pub struct OrderedIndexMap<K, O, V, S = RandomState> {
     /// Owning arena and private indexes.
@@ -260,21 +260,6 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
         self.state.arena.capacity().min(self.state.primary.capacity())
     }
 
-    /// Removes every record while retaining allocated primary capacity.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the map is poisoned or a stored destructor panics.
-    #[inline]
-    pub fn clear(&mut self) {
-        self.with_mutation(|state, _| {
-            state.primary.clear();
-            state.ordered.clear();
-            state.arena.clear();
-            state.next_sequence = 0;
-        });
-    }
-
     /// Returns views of every primary record in unspecified order.
     ///
     /// Detached records are included.
@@ -377,6 +362,21 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
             .map(|(_, id)| self.entry_ref(*id))
     }
 
+    /// Removes every record while retaining allocated primary capacity.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the map is poisoned or a stored destructor panics.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.with_mutation(|state, _| {
+            state.primary.clear();
+            state.ordered.clear();
+            state.arena.clear();
+            state.next_sequence = 0;
+        });
+    }
+
     /// Requires that no earlier cross-index mutation unwound.
     #[inline]
     fn assert_healthy(&self) {
@@ -391,6 +391,14 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     /// # Type Parameters
     ///
     /// * `R` - Result type returned by the mutation closure.
+    ///
+    /// # Parameters
+    ///
+    /// * `operation` - Cross-index update to run while the map is poisoned.
+    ///
+    /// # Returns
+    ///
+    /// The value returned by `operation`.
     #[inline]
     fn with_mutation<R>(&mut self, operation: impl FnOnce(&mut InternalState<K, O, V>, &S) -> R) -> R {
         self.assert_healthy();
@@ -401,6 +409,18 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     }
 
     /// Converts one occupied slot into a shared public view.
+    ///
+    /// # Parameters
+    ///
+    /// * `id` - Occupied arena slot referenced by an index.
+    ///
+    /// # Returns
+    ///
+    /// A shared view of the occupied record.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id` does not identify an occupied arena slot.
     #[inline]
     fn entry_ref(&self, id: SlotId) -> EntryRef<'_, K, O, V> {
         let record = self
@@ -417,6 +437,18 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     }
 
     /// Converts one occupied slot into an exclusive public value view.
+    ///
+    /// # Parameters
+    ///
+    /// * `id` - Occupied arena slot referenced by an index.
+    ///
+    /// # Returns
+    ///
+    /// An exclusive value view of the occupied record.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id` does not identify an occupied arena slot.
     #[inline]
     fn entry_mut(&mut self, id: SlotId) -> EntryMut<'_, K, O, V> {
         let record = self
@@ -434,6 +466,18 @@ impl<K, O, V, S> OrderedIndexMap<K, O, V, S> {
     }
 
     /// Converts one detached slot into its specialized value view.
+    ///
+    /// # Parameters
+    ///
+    /// * `id` - Detached arena slot referenced by the primary index.
+    ///
+    /// # Returns
+    ///
+    /// An exclusive value view of the detached record.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id` is vacant or its record is attached.
     #[inline]
     fn detached_entry_mut(&mut self, id: SlotId) -> DetachedEntryMut<'_, K, O, V> {
         let record = self
@@ -511,6 +555,32 @@ where
         Some(&self.state.arena.get(id)?.value)
     }
 
+    /// Returns a complete shared record view by borrowed primary key.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed form of the primary key to locate.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `Q` - Borrowed key type used to query the primary index.
+    ///
+    /// # Returns
+    ///
+    /// A shared record view, or `None` when `key` is absent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or hashing or comparing `key` panics.
+    #[inline]
+    pub fn get_entry<Q>(&self, key: &Q) -> Option<EntryRef<'_, K, O, V>>
+    where
+        K: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        self.find_slot(key).map(|id| self.entry_ref(id))
+    }
+
     /// Returns exclusive value access by borrowed primary key.
     ///
     /// # Parameters
@@ -536,32 +606,6 @@ where
     {
         let id = self.find_slot(key)?;
         Some(&mut self.state.arena.get_mut(id)?.value)
-    }
-
-    /// Returns a complete shared record view by borrowed primary key.
-    ///
-    /// # Parameters
-    ///
-    /// * `key` - Borrowed form of the primary key to locate.
-    ///
-    /// # Type Parameters
-    ///
-    /// * `Q` - Borrowed key type used to query the primary index.
-    ///
-    /// # Returns
-    ///
-    /// A shared record view, or `None` when `key` is absent.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the map is poisoned or hashing or comparing `key` panics.
-    #[inline]
-    pub fn get_entry<Q>(&self, key: &Q) -> Option<EntryRef<'_, K, O, V>>
-    where
-        K: Borrow<Q>,
-        Q: Eq + Hash + ?Sized,
-    {
-        self.find_slot(key).map(|id| self.entry_ref(id))
     }
 
     /// Returns a complete record view with exclusive value access.
@@ -626,6 +670,18 @@ where
     /// # Type Parameters
     ///
     /// * `Q` - Borrowed key type used to query the primary index.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Borrowed primary key to find.
+    ///
+    /// # Returns
+    ///
+    /// The matching arena slot, or `None` when no equivalent key is present.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned or hashing/comparing `key` panics.
     #[inline]
     fn find_slot<Q>(&self, key: &Q) -> Option<SlotId>
     where
@@ -1077,6 +1133,11 @@ where
     O: Ord,
 {
     /// Detaches one slot with a prevalidated ordered-index key.
+    ///
+    /// # Parameters
+    ///
+    /// * `id` - Occupied slot to detach.
+    /// * `ordered_key` - Existing ordered-index key for `id`.
     fn detach_slot(&mut self, id: SlotId, ordered_key: (O, Sequence)) {
         self.with_mutation(|state, _| {
             let removed = state.ordered.remove(&ordered_key);
@@ -1090,6 +1151,16 @@ where
     }
 
     /// Removes one slot and both of its index references.
+    ///
+    /// # Parameters
+    ///
+    /// * `hash` - Precomputed hash of the slot's primary key.
+    /// * `id` - Occupied slot to remove.
+    /// * `ordered_key` - Ordered-index key when the slot is attached.
+    ///
+    /// # Returns
+    ///
+    /// The removed record, including its prior attachment state.
     fn remove_slot(&mut self, hash: u64, id: SlotId, ordered_key: Option<(O, Sequence)>) -> OwnedEntry<K, O, V> {
         self.with_mutation(|state, _| {
             remove_primary_id(state, hash, id);
@@ -1107,6 +1178,10 @@ where
     S: Default,
 {
     /// Creates an empty map with the hash builder's default value.
+    ///
+    /// # Returns
+    ///
+    /// An empty map with `S::default()` as its hash builder.
     #[inline]
     fn default() -> Self {
         Self::with_hasher(S::default())
@@ -1120,6 +1195,13 @@ where
     V: Clone,
     S: Clone,
 {
+    /// Clones the map's records, indexes, and hash builder.
+    ///
+    /// The clone starts healthy; cloning a poisoned map panics.
+    ///
+    /// # Returns
+    ///
+    /// A healthy clone with equivalent records and indexes.
     fn clone(&self) -> Self {
         self.assert_healthy();
         Self {
@@ -1137,6 +1219,23 @@ where
     V: fmt::Debug,
     S: fmt::Debug,
 {
+    /// Formats the map's records and hash builder for debugging.
+    ///
+    /// # Parameters
+    ///
+    /// * `formatter` - Formatter that receives the debug representation.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when formatting succeeds, or the formatter's error.
+    ///
+    /// # Errors
+    ///
+    /// Returns `fmt::Error` when formatting cannot be completed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the map is poisoned.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.assert_healthy();
         formatter
@@ -1154,6 +1253,16 @@ where
 /// * `K` - Primary-key type stored in the map.
 /// * `O` - Ordered secondary-key type stored in the map.
 /// * `V` - Value type stored in the map.
+///
+/// # Parameters
+///
+/// * `state` - Mutable map state whose primary index contains `id`.
+/// * `hash` - Precomputed hash used to locate the primary-index bucket.
+/// * `id` - Exact arena slot identifier to remove.
+///
+/// # Panics
+///
+/// Panics if the primary index does not contain `id` at `hash`.
 fn remove_primary_id<K, O, V>(state: &mut InternalState<K, O, V>, hash: u64, id: SlotId) {
     let entry = state
         .primary
@@ -1170,6 +1279,14 @@ fn remove_primary_id<K, O, V>(state: &mut InternalState<K, O, V>, hash: u64, id:
 /// * `K` - Primary-key type stored in the record.
 /// * `O` - Ordered secondary-key type stored in the record.
 /// * `V` - Value type stored in the record.
+///
+/// # Parameters
+///
+/// * `record` - Private arena record to transfer into the owned representation.
+///
+/// # Returns
+///
+/// An owned entry preserving the record's attachment state.
 fn owned_from_record<K, O, V>(record: Record<K, O, V>) -> OwnedEntry<K, O, V> {
     let state = record.state();
     OwnedEntry {
@@ -1186,6 +1303,19 @@ fn owned_from_record<K, O, V>(record: Record<K, O, V>) -> OwnedEntry<K, O, V> {
 ///
 /// * `O` - Ordered secondary-key type.
 /// * `R` - Range-bounds type that borrows secondary keys.
+///
+/// # Parameters
+///
+/// * `range` - Bounds over ordered secondary keys.
+///
+/// # Returns
+///
+/// Bounds expanded to include every stable sequence for matching keys.
+///
+/// # Panics
+///
+/// Panics when the range violates the ordered-map range contract or cloning a
+/// bound panics.
 #[must_use]
 fn order_range_bounds<O, R>(range: &R) -> SequenceBounds<O>
 where
@@ -1218,6 +1348,10 @@ where
 ///
 /// * `O` - Ordered secondary-key type.
 /// * `R` - Range-bounds type that borrows secondary keys.
+///
+/// # Parameters
+///
+/// * `range` - Bounds over ordered secondary keys to validate.
 fn assert_valid_order_range<O, R>(range: &R)
 where
     O: Ord,

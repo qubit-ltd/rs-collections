@@ -45,6 +45,12 @@ pub struct TryInsertError<K, O, V> {
 
 impl<K, O, V> TryInsertError<K, O, V> {
     /// Creates an error from rejected insertion input.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Primary key rejected because it was already present.
+    /// * `order` - Ordered secondary key retained from the rejected input.
+    /// * `value` - Value retained from the rejected input.
     #[inline]
     pub(super) const fn new(key: K, order: O, value: V) -> Self {
         Self { key, order, value }
@@ -96,6 +102,13 @@ impl<K, O, V> TryInsertError<K, O, V> {
 }
 
 impl<K, O, V> fmt::Display for TryInsertError<K, O, V> {
+    /// Formats the rejection reason without exposing the rejected input.
+    ///
+    /// The display text is independent of the key, order, and value types.
+    ///
+    /// # Parameters
+    ///
+    /// * `formatter` - Destination receiving the fixed rejection message.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("primary key is already present")
     }

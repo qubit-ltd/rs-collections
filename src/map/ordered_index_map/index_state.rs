@@ -15,7 +15,7 @@
 /// use qubit_collections::map::ordered_index_map::{IndexState, OrderedIndexMap};
 ///
 /// let mut map = OrderedIndexMap::new();
-/// map.insert("job", 10, "ready");
+/// assert!(map.insert("job", 10, "ready").is_none());
 /// drop(map.detach("job").expect("the job was just inserted"));
 /// let entry = map.get_entry("job").expect("detaching retains the record");
 /// assert_eq!(IndexState::Detached, entry.state());

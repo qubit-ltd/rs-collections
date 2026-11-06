@@ -49,6 +49,10 @@ impl<T> EntryArena<T> {
     /// # Returns
     ///
     /// An empty arena with reserved slot storage.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the requested capacity overflows or allocation fails.
     #[must_use]
     #[inline]
     pub(crate) fn with_capacity(capacity: usize) -> Self {
@@ -79,6 +83,44 @@ impl<T> EntryArena<T> {
     #[inline]
     pub(crate) fn capacity(&self) -> usize {
         self.slots.capacity()
+    }
+
+    /// Returns a shared value reference for an occupied slot.
+    ///
+    /// # Parameters
+    ///
+    /// * `id` - Internal slot identifier.
+    ///
+    /// # Returns
+    ///
+    /// `Some(value)` for an occupied slot, or `None` for a vacant slot.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `id` is outside the private arena, which indicates an
+    /// internal index invariant violation.
+    #[inline]
+    pub(crate) fn get(&self, id: SlotId) -> Option<&T> {
+        self.slots[id.0].as_ref()
+    }
+
+    /// Returns an exclusive value reference for an occupied slot.
+    ///
+    /// # Parameters
+    ///
+    /// * `id` - Internal slot identifier.
+    ///
+    /// # Returns
+    ///
+    /// `Some(value)` for an occupied slot, or `None` for a vacant slot.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `id` is outside the private arena, which indicates an
+    /// internal index invariant violation.
+    #[inline]
+    pub(crate) fn get_mut(&mut self, id: SlotId) -> Option<&mut T> {
+        self.slots[id.0].as_mut()
     }
 
     /// Reserves capacity for at least `additional` more occupied values.
@@ -119,44 +161,6 @@ impl<T> EntryArena<T> {
         };
         self.len += 1;
         SlotId(slot)
-    }
-
-    /// Returns a shared value reference for an occupied slot.
-    ///
-    /// # Parameters
-    ///
-    /// * `id` - Internal slot identifier.
-    ///
-    /// # Returns
-    ///
-    /// `Some(value)` for an occupied slot, or `None` for a vacant slot.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `id` is outside the private arena, which indicates an
-    /// internal index invariant violation.
-    #[inline]
-    pub(crate) fn get(&self, id: SlotId) -> Option<&T> {
-        self.slots[id.0].as_ref()
-    }
-
-    /// Returns an exclusive value reference for an occupied slot.
-    ///
-    /// # Parameters
-    ///
-    /// * `id` - Internal slot identifier.
-    ///
-    /// # Returns
-    ///
-    /// `Some(value)` for an occupied slot, or `None` for a vacant slot.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `id` is outside the private arena, which indicates an
-    /// internal index invariant violation.
-    #[inline]
-    pub(crate) fn get_mut(&mut self, id: SlotId) -> Option<&mut T> {
-        self.slots[id.0].as_mut()
     }
 
     /// Removes and returns one occupied value.

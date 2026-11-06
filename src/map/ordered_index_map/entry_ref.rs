@@ -33,13 +33,13 @@ use super::IndexState;
 #[derive(Clone, Copy, Debug)]
 #[must_use = "the entry view provides access to a stored record"]
 pub struct EntryRef<'a, K, O, V> {
-    /// Primary key.
+    /// Key used to find this record in the primary map.
     pub(crate) key: &'a K,
-    /// Retained ordered key.
+    /// Order key retained by the record, including while it is detached.
     pub(crate) order: &'a O,
-    /// Stored value.
+    /// Value associated with this record in the primary map.
     pub(crate) value: &'a V,
-    /// Current ordered-index attachment state.
+    /// Whether the ordered secondary index currently includes this record.
     pub(crate) state: IndexState,
 }
 

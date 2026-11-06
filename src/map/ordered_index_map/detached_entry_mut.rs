@@ -46,7 +46,7 @@ impl<'a, K, O, V> DetachedEntryMut<'a, K, O, V> {
     /// # Returns
     ///
     /// The key retained by the detached primary record.
-    #[must_use]
+    #[must_use = "the retained key is needed to identify the detached record"]
     #[inline]
     pub const fn key(&self) -> &K {
         self.key
@@ -57,7 +57,7 @@ impl<'a, K, O, V> DetachedEntryMut<'a, K, O, V> {
     /// # Returns
     ///
     /// The order that can be reused by a later attachment.
-    #[must_use]
+    #[must_use = "the retained order is needed to reattach the detached record"]
     #[inline]
     pub const fn order(&self) -> &O {
         self.order
@@ -68,7 +68,7 @@ impl<'a, K, O, V> DetachedEntryMut<'a, K, O, V> {
     /// # Returns
     ///
     /// A shared reference to the retained value.
-    #[must_use]
+    #[must_use = "the stored value must be observed"]
     #[inline]
     pub const fn value(&self) -> &V {
         self.value
@@ -79,7 +79,7 @@ impl<'a, K, O, V> DetachedEntryMut<'a, K, O, V> {
     /// # Returns
     ///
     /// A mutable reference that cannot change the retained key or order.
-    #[must_use]
+    #[must_use = "the stored value must be observed or modified"]
     #[inline]
     pub fn value_mut(&mut self) -> &mut V {
         self.value
@@ -90,7 +90,7 @@ impl<'a, K, O, V> DetachedEntryMut<'a, K, O, V> {
     /// # Returns
     ///
     /// The mutable value reference with the view's original lifetime.
-    #[must_use]
+    #[must_use = "the stored value reference must be used"]
     #[inline]
     pub fn into_value_mut(self) -> &'a mut V {
         self.value

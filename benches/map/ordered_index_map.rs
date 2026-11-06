@@ -248,7 +248,7 @@ fn benchmark_primary_lookup(criterion: &mut Criterion) {
 /// # Parameters
 ///
 /// * `criterion` - Criterion benchmark registry.
-fn benchmark_first(criterion: &mut Criterion) {
+fn benchmark_first_attached_record(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("ordered_index_map/first");
     for entry_count in ENTRY_COUNTS {
         let map = populated_map(entry_count);
@@ -458,7 +458,7 @@ criterion_group!(
     benchmark_equal_order_insertion,
     benchmark_shuffled_order_insertion,
     benchmark_primary_lookup,
-    benchmark_first,
+    benchmark_first_attached_record,
     benchmark_detach_range,
     benchmark_extract_range,
     benchmark_due_batch_extraction,

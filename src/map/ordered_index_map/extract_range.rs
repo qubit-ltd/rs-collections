@@ -62,6 +62,7 @@ where
     O: Ord + Clone,
     S: BuildHasher,
 {
+    /// The owned record removed from the map by each successful iteration step.
     type Item = OwnedEntry<K, O, V>;
 
     /// Removes and returns the first remaining entry in the requested range.
