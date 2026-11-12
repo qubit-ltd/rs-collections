@@ -55,6 +55,21 @@ type SequenceBounds<O> = (Bound<(O, Sequence)>, Bound<(O, Sequence)>);
 /// `insert` replaces an occupied primary key and returns the previous record.
 /// Use [`Self::try_insert`] when replacement would indicate a caller error.
 ///
+/// # Capacity and Memory
+///
+/// Removing records with [`Self::remove`], [`Self::pop_first`], or
+/// [`Self::extract_range`] does not automatically shrink primary storage.
+/// Detaching a record also retains its primary record. [`Self::clear`] removes
+/// all records and resets the attachment sequence, but retains primary-storage
+/// capacity. That capacity can reflect an earlier peak or an explicit
+/// reservation rather than the current record count.
+///
+/// To release the map's owned allocations, drop it. If records must be kept,
+/// save those records and the desired hash-builder configuration, then build a
+/// new map. Releasing the map's allocations does not guarantee that the
+/// allocator immediately reduces process memory usage. This type provides no
+/// operation to shrink its storage in place.
+///
 /// This type performs no internal locking. It is [`Send`] and [`Sync`] exactly
 /// when its type parameters and hash builder are, which makes it suitable for
 /// external synchronization with types such as [`std::sync::Mutex`] or

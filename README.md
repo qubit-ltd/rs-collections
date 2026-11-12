@@ -40,7 +40,16 @@ synchronization primitive appropriate for its owner.
 | Inspect the smallest attached record | `O(log n)` |
 | Insert, replace, remove, attach, detach, or reorder one record | `O(log n)` |
 | Detach or extract a range containing `k` records | `O(k log n)` |
-| Storage | `O(n)` |
+| Storage | `O(c + a)` |
+
+Here, `n` is the current number of primary records, `a` is the number of
+attached records, and `c` is the retained capacity scale of primary storage.
+Reservations and past peaks can make `c` much larger than `n`. Primary storage
+retains capacity after removals and `clear`; its allocation can reflect a
+previous peak or explicit reservation rather than the current record count.
+Detaching retains the primary record. Dropping the map releases its owned
+allocations, while allocator behavior determines whether process memory usage
+decreases immediately.
 
 ## Installation
 
