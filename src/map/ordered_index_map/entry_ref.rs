@@ -11,6 +11,10 @@ use super::IndexState;
 
 /// Shared key, order, value, and attachment state for one record.
 ///
+/// Copying or cloning this view copies only its shared references and state; it
+/// does not clone or allocate the referenced record data. Each reference keeps
+/// the lifetime of the borrowed map data.
+///
 /// # Type Parameters
 ///
 /// * `K` - Primary key type.
@@ -30,7 +34,7 @@ use super::IndexState;
 /// assert_eq!("ready", *entry.value());
 /// assert!(entry.is_attached());
 /// ```
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 #[must_use = "the entry view provides access to a stored record"]
 pub struct EntryRef<'a, K, O, V> {
     /// Key used to find this record in the primary map.
@@ -41,6 +45,21 @@ pub struct EntryRef<'a, K, O, V> {
     pub(crate) value: &'a V,
     /// Whether the ordered secondary index currently includes this record.
     pub(crate) state: IndexState,
+}
+
+impl<K, O, V> Copy for EntryRef<'_, K, O, V> {}
+
+impl<K, O, V> Clone for EntryRef<'_, K, O, V> {
+    /// Copies the shared references and attachment state without cloning
+    /// records.
+    ///
+    /// # Returns
+    ///
+    /// A view of the same record with the original reference lifetimes.
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
 impl<'a, K, O, V> EntryRef<'a, K, O, V> {

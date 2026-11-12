@@ -358,6 +358,36 @@ fn test_pop_first_does_not_require_key_equality_or_order_cloning() {
 }
 
 #[test]
+fn test_entry_ref_copy_clone_without_component_bounds() {
+    fn assert_copy<T: Copy>() {}
+    fn assert_clone<T: Clone>() {}
+    fn clone_view<T: Clone>(view: &T) -> T {
+        view.clone()
+    }
+
+    let mut map = OrderedIndexMap::new();
+    map.insert(NonCloneKey(1), String::from("order"), Box::new(7_u8));
+
+    let entry = map
+        .get_entry(&NonCloneKey(1))
+        .expect("inserted record should be addressable");
+    type Entry<'a> = qubit_collections::map::ordered_index_map::EntryRef<'a, NonCloneKey, String, Box<u8>>;
+    assert_copy::<Entry<'_>>();
+    assert_clone::<Entry<'_>>();
+
+    let copied = entry;
+    let cloned = clone_view(&entry);
+    assert!(std::ptr::eq(entry.key(), copied.key()));
+    assert!(std::ptr::eq(entry.order(), copied.order()));
+    assert!(std::ptr::eq(entry.value(), copied.value()));
+    assert!(std::ptr::eq(entry.key(), cloned.key()));
+    assert!(std::ptr::eq(entry.order(), cloned.order()));
+    assert!(std::ptr::eq(entry.value(), cloned.value()));
+    assert_eq!(entry.state(), copied.state());
+    assert_eq!(entry.state(), cloned.state());
+}
+
+#[test]
 fn test_ordered_index_map_supports_non_clone_primary_keys() {
     let mut map = OrderedIndexMap::new();
     assert!(map.insert(NonCloneKey(1), 10_u64, "value").is_none());
