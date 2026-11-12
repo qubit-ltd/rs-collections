@@ -77,9 +77,7 @@ dependencies = [
 
 [[package]]
 name = "qubit-collections"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b35d268dde323d67cc884be0e986bdf1786766f3eb7fb7323d6636cbd632a901"
+version = "0.2.4"
 dependencies = [
  "hashbrown",
 ]
