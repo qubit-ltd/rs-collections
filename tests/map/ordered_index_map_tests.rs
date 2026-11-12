@@ -8,6 +8,7 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::hash::BuildHasherDefault;
 use std::hash::Hash;
 use std::hash::Hasher;
@@ -241,7 +242,10 @@ fn ordered_model_range(model: &HashMap<u8, ModelEntry>, lower: u8, upper: u8) ->
 }
 
 /// Verifies every public read view against the model.
-fn assert_matches_model(map: &OrderedIndexMap<u8, u8, i16>, model: &HashMap<u8, ModelEntry>) {
+fn assert_matches_model<S>(map: &OrderedIndexMap<u8, u8, i16, S>, model: &HashMap<u8, ModelEntry>)
+where
+    S: BuildHasher,
+{
     assert_eq!(model.len(), map.len());
     assert_eq!(
         model.values().filter(|entry| entry.sequence.is_some()).count(),
@@ -252,7 +256,7 @@ fn assert_matches_model(map: &OrderedIndexMap<u8, u8, i16>, model: &HashMap<u8, 
         .map(|entry| (*entry.key(), *entry.order(), *entry.value()))
         .collect::<Vec<_>>();
     assert_eq!(ordered_model(model), actual);
-    for key in 0..8 {
+    for key in 0..=u8::MAX {
         let expected = model.get(&key);
         assert_eq!(expected.is_some(), map.contains_key(&key));
         assert_eq!(expected.map(|entry| entry.value), map.get(&key).copied());
@@ -968,6 +972,190 @@ fn test_ordered_index_map_poisoned_after_order_mutation_panic() {
         .is_err(),
     );
     assert!(catch_unwind(AssertUnwindSafe(|| map.len())).is_err());
+}
+
+#[test]
+fn test_ordered_index_map_colliding_keys_lifecycle() {
+    let mut map = OrderedIndexMap::<u8, u8, i16, ConstantBuildHasher>::with_hasher(ConstantBuildHasher::default());
+    let mut model = HashMap::<u8, ModelEntry>::new();
+    let mut sequence = 0_u64;
+    let mut capacity_growths = 0;
+    let mut prior_capacity = map.capacity();
+
+    for key in 0_u8..128 {
+        let order = key % 8;
+        let value = i16::from(key);
+        assert!(map.insert(key, order, value).is_none());
+        model.insert(
+            key,
+            ModelEntry {
+                order,
+                value,
+                sequence: Some(sequence),
+            },
+        );
+        sequence += 1;
+        let capacity = map.capacity();
+        if capacity > prior_capacity {
+            capacity_growths += 1;
+        }
+        prior_capacity = capacity;
+        assert_matches_model(&map, &model);
+    }
+    assert!(capacity_growths >= 2);
+
+    for key in 0_u8..16 {
+        let rejected = map
+            .try_insert(key, 7, -1)
+            .expect_err("existing collision key should be rejected");
+        assert_eq!((key, 7, -1), rejected.into_parts());
+        assert_matches_model(&map, &model);
+    }
+
+    for key in 0_u8..16 {
+        let old = model.get(&key).expect("model record exists").clone();
+        let old_state = if old.sequence.is_some() {
+            IndexState::Attached
+        } else {
+            IndexState::Detached
+        };
+        assert_eq!(
+            Some((key, old.order, old.value, old_state)),
+            map.insert(key, 7 - key % 8, -1).map(|entry| entry.into_parts()),
+        );
+        model.insert(
+            key,
+            ModelEntry {
+                order: 7 - key % 8,
+                value: -1,
+                sequence: Some(sequence),
+            },
+        );
+        sequence += 1;
+        assert_matches_model(&map, &model);
+    }
+
+    for key in 16_u8..80 {
+        let old = model.remove(&key).expect("model record exists");
+        let old_state = if old.sequence.is_some() {
+            IndexState::Attached
+        } else {
+            IndexState::Detached
+        };
+        assert_eq!(
+            Some((key, old.order, old.value, old_state)),
+            map.remove(&key).map(|entry| entry.into_parts())
+        );
+        assert_matches_model(&map, &model);
+    }
+    let _capacity_after_deletions = map.capacity();
+
+    for key in 128_u8..192 {
+        let order = key % 8;
+        let value = i16::from(key);
+        assert!(map.insert(key, order, value).is_none());
+        model.insert(
+            key,
+            ModelEntry {
+                order,
+                value,
+                sequence: Some(sequence),
+            },
+        );
+        sequence += 1;
+        assert_matches_model(&map, &model);
+    }
+    assert_eq!(128, map.len());
+    // EntryArena::insert pops free_slots before appending a new slot. The
+    // preceding 64 removals followed by 64 distinct insertions exercise reuse.
+    let _capacity_after_reuse = map.capacity();
+
+    for key in 80_u8..96 {
+        let model_entry = model.get_mut(&key).expect("model record exists");
+        assert!(model_entry.sequence.is_some());
+        model_entry.sequence = None;
+        {
+            let detached = map.detach(&key).expect("attached record should detach");
+            assert_eq!(key, *detached.key());
+            assert_eq!(model_entry.order, *detached.order());
+            assert_eq!(model_entry.value, *detached.value());
+        }
+        assert_matches_model(&map, &model);
+    }
+
+    for key in 80_u8..88 {
+        let entry = map.attach(&key).expect("detached record should attach");
+        assert_eq!(key, *entry.key());
+        let model_entry = model.get_mut(&key).expect("model record exists");
+        model_entry.sequence = Some(sequence);
+        sequence += 1;
+        assert_matches_model(&map, &model);
+    }
+
+    for key in 80_u8..96 {
+        let model_entry = model.get_mut(&key).expect("model record exists");
+        let old_order = model_entry.order;
+        assert_eq!(Some(old_order), map.set_order(&key, 3));
+        model_entry.order = 3;
+        if model_entry.sequence.is_some() {
+            model_entry.sequence = Some(sequence);
+            sequence += 1;
+        }
+        assert_matches_model(&map, &model);
+    }
+
+    let expected_first = ordered_model(&model).first().copied();
+    if let Some((key, _, _)) = expected_first {
+        model.remove(&key);
+    }
+    assert_eq!(
+        expected_first,
+        map.pop_first().map(|entry| {
+            let (key, order, value, state) = entry.into_parts();
+            assert_eq!(IndexState::Attached, state);
+            (key, order, value)
+        }),
+    );
+    assert_matches_model(&map, &model);
+
+    let expected_range = ordered_model_range(&model, 2, 4);
+    let actual_range = map
+        .extract_range(2..=4)
+        .map(|entry| {
+            let (key, order, value, state) = entry.into_parts();
+            assert_eq!(IndexState::Attached, state);
+            (key, order, value)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(expected_range, actual_range);
+    for (key, _, _) in expected_range {
+        model.remove(&key);
+    }
+    assert_matches_model(&map, &model);
+
+    assert_eq!(None, map.get(&250));
+    assert_eq!(None, map.remove(&250));
+    assert!(map.attach(&250).is_none());
+    assert!(map.detach(&250).is_none());
+    assert_matches_model(&map, &model);
+
+    let mut remaining_keys = model.keys().copied().collect::<Vec<_>>();
+    remaining_keys.sort_unstable();
+    for key in remaining_keys {
+        let old = model.remove(&key).expect("model record exists");
+        let old_state = if old.sequence.is_some() {
+            IndexState::Attached
+        } else {
+            IndexState::Detached
+        };
+        assert_eq!(
+            Some((key, old.order, old.value, old_state)),
+            map.remove(&key).map(|entry| entry.into_parts())
+        );
+        assert_matches_model(&map, &model);
+    }
+    assert!(map.is_empty());
+    assert!(map.is_attached_empty());
 }
 
 #[test]
