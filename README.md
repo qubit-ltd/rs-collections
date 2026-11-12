@@ -38,8 +38,8 @@ synchronization primitive appropriate for its owner.
 |---|---|
 | Lookup or value mutation by primary key | Average `O(1)` |
 | Inspect the smallest attached record | `O(log n)` |
-| Insert, replace, remove, attach, detach, or reorder one record | `O(log n)` |
-| Detach or extract a range containing `k` records | `O(k log n)` |
+| Insert, replace, remove, attach, detach, or reorder one record | Average/amortized `O(log n)` |
+| Detach or extract a range containing `k` records | Average/amortized `O(k log n)` |
 | Storage | `O(c + a)` |
 
 Here, `n` is the current number of primary records, `a` is the number of
@@ -50,6 +50,14 @@ previous peak or explicit reservation rather than the current record count.
 Detaching retains the primary record. Dropping the map releases its owned
 allocations, while allocator behavior determines whether process memory usage
 decreases immediately.
+
+Time bounds assume well-distributed hashes and constant-cost hashing, equality,
+ordering, cloning, and destruction. Growth costs are amortized across
+operations. A single insertion can perform linear work when primary storage
+grows or its hash index is rebuilt under these assumptions; the table is not a
+per-call latency guarantee. Severe hash collisions can degrade primary-key
+operations to linear time. Range extraction also performs primary-index removal
+for each yielded record.
 
 ## Installation
 
